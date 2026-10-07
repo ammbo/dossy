@@ -1,0 +1,17 @@
+{
+  "name": "@dossy/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@dossy/protocol": "workspace:*",
+    "@noble/hashes": "^2.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "canonicalize": "^2.0.0",
+    "jose": "^6.0.11"
+  }
+}

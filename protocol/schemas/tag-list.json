@@ -1,0 +1,13 @@
+{
+  "$id": "https://dossy.dev/schemas/tag-list.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "maxItems": 24,
+  "uniqueItems": true,
+  "items": {
+    "type": "string",
+    "minLength": 3,
+    "maxLength": 64,
+    "pattern": "^[a-z0-9-]+:[a-z0-9-]+$"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "$id": "https://dossy.dev/schemas/authorization-envelope.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "issuer",
+    "operation_id",
+    "agent_id",
+    "action",
+    "target",
+    "payload_digest",
+    "audience",
+    "permitted_fields",
+    "permission_expires_at",
+    "authorization_mode",
+    "authorization_ref",
+    "iat",
+    "exp"
+  ],
+  "properties": {
+    "protocol": { "const": "private-context-network/0.1" },
+    "issuer": { "type": "string", "format": "uri" },
+    "operation_id": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "agent_id": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "action": {
+      "enum": [
+        "post_request",
+        "submit_offer",
+        "accept_offer",
+        "confirm_connection",
+        "send_message",
+        "withdraw",
+        "revoke_authorization",
+        "report_abuse"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "enum": ["marketplace", "request", "offer", "connection", "authorization"] },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "state_version": { "type": ["integer", "null"], "minimum": 1 },
+    "request_digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "offer_digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "payload_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "audience": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "permitted_fields": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+    },
+    "permission_expires_at": { "type": "string", "format": "date-time" },
+    "authorization_mode": { "const": "human" },
+    "authorization_ref": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "iat": { "type": "integer", "minimum": 0 },
+    "exp": { "type": "integer", "minimum": 0 }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$id": "https://dossy.dev/schemas/offer-plaintext.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["interest"],
+  "properties": {
+    "interest": { "const": true },
+    "available_from": { "type": "string", "format": "date" },
+    "skill_tags": { "$ref": "https://dossy.dev/schemas/tag-list.json" },
+    "experience_summary": { "type": "string", "minLength": 1, "maxLength": 280 },
+    "introduction_scope": { "type": "string", "minLength": 1, "maxLength": 280 }
+  }
+}

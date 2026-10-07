@@ -1,0 +1,62 @@
+{
+  "protocol": "private-context-network/0.1",
+  "vocabulary": "core/0.1",
+  "document_max_bytes": 8192,
+  "note_max_chars": 512,
+  "summary_max_chars": 280,
+  "label_max_chars": 80,
+  "tags_max": 24,
+  "tag_max_chars": 64,
+  "message_plaintext_max_bytes": 4096,
+  "message_ciphertext_max_bytes": 16384,
+  "offer_ciphertext_max_bytes": 16384,
+  "envelope_max_seconds": 900,
+  "assertion_max_seconds": 300,
+  "confirmation_seconds": 900,
+  "coordination_seconds": 86400,
+  "clarifications_per_side": 2,
+  "handoffs_per_side": 1,
+  "request_default_seconds": 604800,
+  "request_min_seconds": 3600,
+  "request_max_seconds": 2592000,
+  "offer_default_seconds": 86400,
+  "offer_max_seconds": 604800,
+  "feed_history_seconds": 604800,
+  "poll_default_seconds": 300,
+  "classes": {
+    "introduction": {
+      "default_max_connections": 1,
+      "max_connections_cap": 1,
+      "offer_fields": [
+        "interest",
+        "introduction_scope",
+        "experience_summary"
+      ]
+    },
+    "advice": {
+      "default_max_connections": 1,
+      "max_connections_cap": 1,
+      "offer_fields": [
+        "interest",
+        "experience_summary",
+        "skill_tags"
+      ]
+    },
+    "hiring": {
+      "default_max_connections": 1,
+      "max_connections_cap": 25,
+      "offer_fields": [
+        "interest",
+        "available_from",
+        "skill_tags"
+      ]
+    },
+    "event": {
+      "default_max_connections": 25,
+      "max_connections_cap": 100,
+      "offer_fields": [
+        "interest"
+      ]
+    }
+  }
+}

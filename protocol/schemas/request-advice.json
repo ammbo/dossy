@@ -1,0 +1,37 @@
+{
+  "$id": "https://dossy.dev/schemas/request-advice.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "revision", "class", "vocabulary", "marketplace_id", "tags", "criteria", "terms", "expires_at", "max_connections", "offer_schema", "reply_key"],
+  "properties": {
+    "protocol": { "const": "private-context-network/0.1" },
+    "revision": { "const": 1 },
+    "class": { "const": "advice" },
+    "vocabulary": { "const": "core/0.1" },
+    "marketplace_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9-]+$" },
+    "tags": { "$ref": "https://dossy.dev/schemas/tag-list.json" },
+    "criteria": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_tags"],
+      "properties": {
+        "required_tags": { "$ref": "https://dossy.dev/schemas/tag-list.json" }
+      }
+    },
+    "terms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["experience_sought"],
+      "properties": {
+        "experience_sought": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "max_connections": { "const": 1 },
+    "offer_schema": { "$ref": "https://dossy.dev/schemas/offer-schema.json" },
+    "requester_display": { "$ref": "https://dossy.dev/schemas/display.json" },
+    "reply_key": { "$ref": "https://dossy.dev/schemas/jwk-enc.json" },
+    "note": { "type": "string", "maxLength": 512 }
+  }
+}

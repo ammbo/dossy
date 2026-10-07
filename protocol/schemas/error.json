@@ -1,0 +1,41 @@
+{
+  "$id": "https://dossy.dev/schemas/error.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "error",
+    "message",
+    "retryable"
+  ],
+  "properties": {
+    "error": {
+      "enum": [
+        "unsupported_version",
+        "invalid_schema",
+        "unauthorized",
+        "forbidden",
+        "stale_state",
+        "expired",
+        "revoked",
+        "capacity_reached",
+        "rate_limited",
+        "cursor_expired",
+        "payload_unavailable",
+        "idempotency_conflict",
+        "unavailable"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "retry_after": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

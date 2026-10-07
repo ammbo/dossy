@@ -1,0 +1,29 @@
+{
+  "$id": "https://dossy.dev/schemas/discovery.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "issuer", "spec_url", "endpoints", "keys", "versions", "vocabularies", "classes", "limits", "privacy"],
+  "properties": {
+    "protocol": { "const": "private-context-network/0.1" },
+    "issuer": { "type": "string", "format": "uri" },
+    "spec_url": { "type": "string", "format": "uri" },
+    "endpoints": { "type": "object" },
+    "keys": { "type": "array", "items": { "$ref": "https://dossy.dev/schemas/jwk-sig.json" } },
+    "versions": { "type": "array", "items": { "type": "string" } },
+    "vocabularies": { "type": "array", "items": { "type": "string" } },
+    "classes": { "type": "array", "items": { "enum": ["introduction", "advice", "hiring", "event"] } },
+    "limits": { "type": "object" },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["access_history", "offer_bodies", "payload_backups"],
+      "properties": {
+        "access_history": { "const": "not_retained" },
+        "offer_bodies": { "const": "ciphertext_ttl" },
+        "payload_backups": { "const": false },
+        "retention_profile_url": { "type": "string" }
+      }
+    }
+  }
+}

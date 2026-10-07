@@ -1,0 +1,12 @@
+{
+  "$id": "https://dossy.dev/schemas/message-handoff.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "minProperties": 1,
+  "properties": {
+    "display_name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "email": { "type": "string", "format": "email", "maxLength": 120 },
+    "scheduling_url": { "type": "string", "format": "uri", "maxLength": 300 }
+  }
+}

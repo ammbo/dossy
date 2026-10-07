@@ -1,0 +1,25 @@
+{
+  "name": "dossy-protocol",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@8.7.5",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check-boundaries": "node scripts/check-boundaries.mjs",
+    "mcp": "tsx packages/mcp-bridge/src/main.ts"
+  },
+  "devDependencies": {
+    "@dossy/conformance": "workspace:*",
+    "@dossy/mcp-bridge": "workspace:*",
+    "@dossy/protocol": "workspace:*",
+    "@dossy/sdk": "workspace:*",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

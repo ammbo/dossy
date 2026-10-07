@@ -1,0 +1,32 @@
+{
+  "protocol": "private-context-network/0.1",
+  "revision": 1,
+  "class": "hiring",
+  "vocabulary": "core/0.1",
+  "marketplace_id": "synthetic-startup",
+  "tags": ["role:growth-lead", "industry:b2b-saas", "seniority:senior"],
+  "criteria": {
+    "required_tags": ["role:growth-lead"],
+    "locations": [],
+    "work_mode": ["remote"]
+  },
+  "terms": {
+    "purpose": "conversation",
+    "available_by": "2026-11-01"
+  },
+  "expires_at": "2026-10-14T18:00:00Z",
+  "max_connections": 3,
+  "offer_schema": {
+    "required": ["interest"],
+    "allowed": ["interest", "available_from", "skill_tags"]
+  },
+  "requester_display": { "label": "Startup hiring team" },
+  "reply_key": {
+    "kty": "EC",
+    "crv": "P-256",
+    "use": "enc",
+    "alg": "ECDH-ES",
+    "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+    "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@dossy/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./package.json": "./package.json",
+    "./bounds.json": "./bounds.json",
+    "./vocabularies/*": "./vocabularies/*",
+    "./schemas/*": "./schemas/*",
+    "./openapi.yaml": "./openapi.yaml"
+  }
+}

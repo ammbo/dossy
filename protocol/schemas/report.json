@@ -1,0 +1,17 @@
+{
+  "$id": "https://dossy.dev/schemas/report.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["category", "description", "transaction_ids"],
+  "properties": {
+    "category": { "enum": ["flooding", "false_claim", "consent", "third_party", "credential", "other"] },
+    "description": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "transaction_ids": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+    "marketplace_id": { "type": "string", "pattern": "^[a-z0-9-]+$" }
+  }
+}

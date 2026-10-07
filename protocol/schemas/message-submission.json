@@ -1,0 +1,11 @@
+{
+  "$id": "https://dossy.dev/schemas/message-submission.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["message_type", "ciphertext"],
+  "properties": {
+    "message_type": { "enum": ["clarification", "handoff"] },
+    "ciphertext": { "type": "string", "minLength": 1, "maxLength": 24000 }
+  }
+}

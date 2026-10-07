@@ -1,0 +1,52 @@
+{
+  "$id": "https://dossy.dev/schemas/request-hiring.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "revision", "class", "vocabulary", "marketplace_id", "tags", "criteria", "terms", "expires_at", "max_connections", "offer_schema", "reply_key"],
+  "properties": {
+    "protocol": { "const": "private-context-network/0.1" },
+    "revision": { "const": 1 },
+    "class": { "const": "hiring" },
+    "vocabulary": { "const": "core/0.1" },
+    "marketplace_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9-]+$" },
+    "tags": { "$ref": "https://dossy.dev/schemas/tag-list.json" },
+    "criteria": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_tags", "locations", "work_mode"],
+      "properties": {
+        "required_tags": { "$ref": "https://dossy.dev/schemas/tag-list.json" },
+        "locations": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^loc:[a-z0-9-]+$" }
+        },
+        "work_mode": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": { "enum": ["remote", "hybrid", "onsite"] }
+        }
+      }
+    },
+    "terms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose"],
+      "properties": {
+        "purpose": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "available_by": { "type": "string", "format": "date" },
+        "compensation": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "max_connections": { "type": "integer", "minimum": 1, "maximum": 25 },
+    "offer_schema": { "$ref": "https://dossy.dev/schemas/offer-schema.json" },
+    "requester_display": { "$ref": "https://dossy.dev/schemas/display.json" },
+    "reply_key": { "$ref": "https://dossy.dev/schemas/jwk-enc.json" },
+    "note": { "type": "string", "maxLength": 512 }
+  }
+}

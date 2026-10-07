@@ -1,0 +1,13 @@
+{
+  "name": "@dossy/mcp-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@dossy/sdk": "workspace:*",
+    "jose": "^6.0.11"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "id": "core/0.1",
+  "protocol": "private-context-network/0.1",
+  "namespaces": {
+    "role": "A function a person might hold. Not a credential.",
+    "industry": "A market the request is about.",
+    "seniority": "A coarse experience band.",
+    "topic": "A subject for advice or conversation.",
+    "skill": "A skill a responder may choose to assert.",
+    "location": "A descriptive place tag. Criteria use loc: identifiers, not these tags."
+  },
+  "namespace_rule": "Tags are lowercase namespace:value. Operators may advertise extension namespaces. They cannot change the meaning of a core tag. Unknown tags are never guessed into a match or a mismatch.",
+  "tags": [
+    { "id": "role:growth-lead", "definition": "A growth leadership role." },
+    { "id": "role:founder", "definition": "A company founder." },
+    { "id": "role:engineer", "definition": "A software engineering role." },
+    { "id": "industry:b2b-saas", "definition": "Business software sold to organizations." },
+    { "id": "industry:fintech", "definition": "Financial technology products." },
+    { "id": "seniority:senior", "definition": "Senior individual contributor or lead." },
+    { "id": "seniority:staff", "definition": "Staff or principal individual contributor." },
+    { "id": "topic:pricing", "definition": "Pricing and packaging." },
+    { "id": "topic:fundraising", "definition": "Raising venture or similar funding." },
+    { "id": "topic:hiring", "definition": "Hiring practices." },
+    { "id": "skill:sql", "definition": "SQL analysis." },
+    { "id": "skill:sales", "definition": "Selling to organizations." },
+    { "id": "location:nyc", "definition": "New York City, descriptive only." }
+  ],
+  "classes": {
+    "introduction": {
+      "summary": "Willingness to discuss making an introduction. No third-party contact details.",
+      "criteria": ["target_ref", "required_tags"],
+      "terms": ["purpose"],
+      "offer_fields": ["interest", "introduction_scope", "experience_summary"]
+    },
+    "advice": {
+      "summary": "Willingness to talk about a kind of experience. No request for private client or employer material.",
+      "criteria": ["required_tags"],
+      "terms": ["experience_sought"],
+      "offer_fields": ["interest", "experience_summary", "skill_tags"]
+    },
+    "hiring": {
+      "summary": "Interest in a role. Identity, employer, and job-search status stay withheld unless a later handoff approves them.",
+      "criteria": ["required_tags", "locations", "work_mode"],
+      "terms": ["purpose", "available_by", "compensation"],
+      "offer_fields": ["interest", "available_from", "skill_tags"]
+    },
+    "event": {
+      "summary": "Interest in an event. Not attendance, payment, or a calendar commitment.",
+      "criteria": ["required_tags", "locations"],
+      "terms": ["title", "starts_at", "ends_at", "format", "location", "purpose", "response_deadline"],
+      "offer_fields": ["interest"]
+    }
+  },
+  "unknown_tag_behavior": {
+    "required": "abstain_locally",
+    "descriptive": "private_evaluation",
+    "report_to_network": false
+  }
+}

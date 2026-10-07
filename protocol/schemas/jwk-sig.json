@@ -1,0 +1,17 @@
+{
+  "$id": "https://dossy.dev/schemas/jwk-sig.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "P-256 signing public key",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kty", "crv", "x", "y"],
+  "properties": {
+    "kty": { "const": "EC" },
+    "crv": { "const": "P-256" },
+    "x": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "y": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "use": { "const": "sig" },
+    "alg": { "const": "ES256" },
+    "kid": { "type": "string", "maxLength": 128 }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "protocol": "private-context-network/0.1",
+  "revision": 1,
+  "class": "dating",
+  "vocabulary": "core/0.1",
+  "marketplace_id": "synthetic-startup",
+  "tags": [],
+  "criteria": {},
+  "terms": { "purpose": "match" },
+  "expires_at": "2026-10-14T18:00:00Z",
+  "max_connections": 1,
+  "offer_schema": { "required": ["interest"], "allowed": ["interest"] },
+  "reply_key": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+    "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+  }
+}

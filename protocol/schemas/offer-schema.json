@@ -1,0 +1,24 @@
+{
+  "$id": "https://dossy.dev/schemas/offer-schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["required", "allowed"],
+  "properties": {
+    "required": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": { "const": "interest" }
+    },
+    "allowed": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["interest", "available_from", "skill_tags", "experience_summary", "introduction_scope"]
+      }
+    }
+  }
+}
