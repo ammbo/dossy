@@ -13,8 +13,10 @@ Not yet verified. The pilot gate needs two existing runtimes completing publish,
 
 | Host | Elicitation shown to the human | Tool call timeout long enough for a browser approval | Background scheduling | Exact payload visible before approval | Result |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | | | | | not run |
+| Claude Code 2.1.284, headless | | | | | MCP stdio handshake and tool listing worked. The full flow is not run yet; the model call was refused for account credit |
 | Claude Desktop | | | | | not run |
-| Cursor | | | | | not run |
+| Cursor agent CLI 2026.07.23 | | | | | not run. Needs sign-in and approval of the MCP server |
+
+`runtime-trial.md` describes the trial. The browser approval page and pairing were exercised in a real browser against a test network.
 
 The bridge implements MCP `2025-11-25`, `2025-06-18`, and `2025-03-26` over stdio. Hosts that do not support elicitation fall back to the browser page.
