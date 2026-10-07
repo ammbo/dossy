@@ -1,5 +1,5 @@
 {
-  "protocol": "private-context-network/0.1",
+  "protocol": "dcp/0.1",
   "vocabulary": "core/0.1",
   "document_max_bytes": 8192,
   "note_max_chars": 512,

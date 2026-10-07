@@ -1,5 +1,5 @@
 {
-  "protocol": "private-context-network/0.1",
+  "protocol": "dcp/0.1",
   "revision": 1,
   "class": "dating",
   "vocabulary": "core/0.1",

@@ -1,14 +1,18 @@
 {
   "name": "@dossy/mcp-bridge",
   "version": "0.2.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "dependencies": {
     "@dossy/sdk": "workspace:*",
     "jose": "^6.0.11",
+    "proper-lockfile": "^4.1.2",
     "tsx": "^4.20.0"
   },
   "bin": {
@@ -16,6 +20,20 @@
   },
   "devDependencies": {
     "@dossy/conformance": "workspace:*",
+    "@types/proper-lockfile": "^4.1.4",
     "vitest": "^3.2.0"
+  },
+  "license": "Apache-2.0",
+  "files": [
+    "dist",
+    "bin",
+    "LICENSE.md",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-packages.mjs"
   }
 }

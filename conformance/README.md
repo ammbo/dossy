@@ -1,6 +1,6 @@
 # Conformance
 
-Two suites check an implementation of `private-context-network/0.1`.
+Two suites check an implementation of `dcp/0.1`.
 
 - `protocol.test.ts` covers schemas, vocabularies, RFC 8785 digests, and the JOSE profile. It needs no network.
 - `wire/` exercises a running network over HTTPS only. It never touches the network's storage.

@@ -1,6 +1,6 @@
 {
   "id": "core/0.1",
-  "protocol": "private-context-network/0.1",
+  "protocol": "dcp/0.1",
   "namespaces": {
     "role": "A function a person might hold. Not a credential.",
     "industry": "A market the request is about.",

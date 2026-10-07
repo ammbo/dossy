@@ -1,14 +1,14 @@
-# Private Context Network 0.1
+# Dossy Communication Protocol (DCP) 0.1
 
-Status: implementation baseline. Wire identifier: `private-context-network/0.1`. Vocabulary: `core/0.1`.
+Status: implementation baseline. Wire identifier: `dcp/0.1`. Vocabulary: `core/0.1`.
 
-This specification is the normative contract for an independent implementation. The first protocol steward publishes it at `dossy.dev`. The first network issuer is `https://dossy.ai`. Clients accept a configured network URL and learn the issuer from `GET /.well-known/private-context-network`. An implementation must not treat Dossy as the only credential authority.
+This specification is the normative contract for an independent implementation. The first protocol steward publishes it at `dossy.dev`. The first network issuer is `https://dossy.ai`. Clients accept a configured network URL and learn the issuer from `GET /.well-known/dcp`. An implementation must not treat Dossy as the only credential authority.
 
 If this document conflicts with the product requirements that produced it, the conflict is resolved in the open. A derived contract must not weaken the privacy rules below.
 
 ## 1. Trust model
 
-The network validates credentials, signatures, ownership, scopes, digests, deadlines, limits, state versions, and revocation. It does not prove that a human approved an action, that a relationship claim is true, or that ciphertext matches the declared fields. Those are obligations of the sending agent.
+The network validates credentials, signatures, ownership, scopes, digests, deadlines, limits, state versions, and revocation. It does not prove that a human approved an action, that a relationship claim is true, or that ciphertext matches the declared fields. Those are obligations of the sending agent. DCP is designed for bilateral, privacy-first negotiation between personal agents, with approved responses and bounded coordination.
 
 The operator sees routing, declared field names, timing, sizes, and submitted transaction relationships. Offer bodies and connection messages are ciphertext. The operator has no payload decryption key and no key escrow.
 
@@ -78,7 +78,7 @@ Revoking an authorization that was never submitted creates no network event. Rev
 
 ## 6. HTTP access
 
-Agent API calls use an OAuth 2.1 access token from `POST /v0.1/oauth/token` with `private_key_jwt` (`urn:ietf:params:oauth:client-assertion-type:jwt-bearer`). The assertion is signed by the registered key, with `iss` and `sub` equal to the agent id and `aud` equal to the issuer. Access tokens are short-lived. Every write, including a retry, loads the agent and rejects a revoked credential.
+Agent API calls use an OAuth 2.1 access token from `POST /v0.1/auth/token` with `private_key_jwt` (`urn:ietf:params:oauth:client-assertion-type:jwt-bearer`). The assertion is signed by the registered key, with `iss` and `sub` equal to the agent id and `aud` equal to the issuer. Access tokens are short-lived. Every write, including a retry, loads the agent and rejects a revoked credential.
 
 A network may offer device-style pairing so an agent never handles an account credential. Discovery advertises it as `endpoints.pairing`.
 
@@ -89,6 +89,14 @@ A network may offer device-style pairing so an agent never handles an account cr
 A pairing code is a phishing target: anyone who gets a human to approve their code gets an agent on that human's account. Networks must show the label and key fingerprint and must warn the human to approve only a pairing they just started.
 
 Agent key registration and revocation use a separate account token. An agent token cannot register or revoke agents. An account token cannot publish a request. How a network admits people, verifies contact, and issues account tokens is operator-defined and outside this specification.
+
+### Agent-led enrollment profile
+
+An operator may advertise `endpoints.invitations` and `endpoints.enrollments` to support agent-consumable join links. A read of an invitation describes the community, role, expiry, instructions, and enrollment endpoint without spending it or retaining reader history. Treat an invite URL as a secret membership capability.
+
+The agent generates a key locally and submits that public key, its label, the invite code, and the human's contact email. A one-time confirmation shows the exact agent and fingerprint to the human, then admits the person and registers that key atomically. Link prefetching must not confirm enrollment. Agents must not consume the human's confirmation link themselves. Polling uses the same proof-of-key-possession profile as pairing. No account token is copied to the agent. A connected agent can redeem further invitations its human requested on the same issuer.
+
+An active key can recover its own agent id with an ES256 proof bound to its JWK thumbprint, the issuer, and purpose `recover_agent`, with a maximum five-minute lifetime. Recovery does not grant membership, register a new key, or restore a revoked key. This permits an interrupted enrollment to resume after its poll window expires.
 
 ## 7. Discovery
 

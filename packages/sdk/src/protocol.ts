@@ -7,7 +7,7 @@ import { base64url } from "jose";
 // Runtime-neutral: Web Crypto, TextEncoder, and module imports only. No Node built-ins, so the SDK
 // also runs in Deno, Bun, browsers, and edge runtimes.
 
-export const PROTOCOL = "private-context-network/0.1";
+export const PROTOCOL = "dcp/0.1";
 export const VOCABULARY = "core/0.1";
 export const DEFAULT_POLL_MS = 300_000;
 

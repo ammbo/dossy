@@ -28,6 +28,12 @@ export function serve(options: ServeOptions): Promise<void> {
   let nextId = 1;
   let bridge: Promise<Bridge> | undefined;
   let clientCanElicit = false;
+  let work: Promise<unknown> = Promise.resolve();
+  const exclusive = <T>(fn: () => Promise<T>): Promise<T> => {
+    const result = work.then(fn);
+    work = result.catch(() => {});
+    return result;
+  };
 
   const write = (message: Message) => {
     options.output.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
@@ -76,7 +82,8 @@ export function serve(options: ServeOptions): Promise<void> {
         const args = (message.params?.arguments as Record<string, unknown> | undefined) ?? {};
         try {
           rejectSecretArguments(args);
-          const result = await tool.run(await ready(), args);
+          const connected = await ready();
+          const result = await exclusive(() => tool.run(connected, args));
           return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result, isError: false };
         } catch (error) {
           const text = error instanceof ToolError || error instanceof Error ? error.message : "The tool failed.";
@@ -89,6 +96,10 @@ export function serve(options: ServeOptions): Promise<void> {
   };
 
   return new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (bridge) void exclusive(async () => { await (await ready()).syncToDigest(); }).catch(() => {});
+    }, 5 * 60_000);
+    timer.unref();
     let buffer = "";
     options.input.setEncoding("utf8");
     options.input.on("data", (chunk: string) => {
@@ -119,6 +130,6 @@ export function serve(options: ServeOptions): Promise<void> {
         );
       }
     });
-    options.input.on("end", () => resolve());
+    options.input.on("end", () => { clearInterval(timer); void work.finally(() => resolve()); });
   });
 }

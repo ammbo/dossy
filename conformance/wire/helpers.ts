@@ -10,7 +10,7 @@ export function at(target: ConformanceTarget, offsetMs: number): string {
 
 export function hiringDocument(target: ConformanceTarget, replyKey: PublicJwk, patch: Record<string, unknown> = {}) {
   return {
-    protocol: "private-context-network/0.1",
+    protocol: "dcp/0.1",
     revision: 1,
     class: "hiring",
     vocabulary: "core/0.1",
@@ -30,7 +30,7 @@ export function hiringDocument(target: ConformanceTarget, replyKey: PublicJwk, p
 export function eventDocument(target: ConformanceTarget, replyKey: PublicJwk, maxConnections = 2) {
   const deadline = at(target, 6 * DAY);
   return {
-    protocol: "private-context-network/0.1",
+    protocol: "dcp/0.1",
     revision: 1,
     class: "event",
     vocabulary: "core/0.1",

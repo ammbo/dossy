@@ -13,6 +13,7 @@ import {
   type Clock,
   type PublicJwk,
 } from "@dossy/sdk";
+import { parseJoinLink } from "./join.js";
 import type { Approver, ApprovalRequest } from "./approval.js";
 import type { Keystore, PendingSend } from "./keystore.js";
 
@@ -43,7 +44,7 @@ export class Bridge {
   ) {}
 
   static async start(store: Keystore, approver: Approver, options: { fetchImpl?: typeof fetch; clock?: Clock } = {}): Promise<Bridge> {
-    if (!store.state.agent_id) throw new ToolError("This bridge is not registered with a network yet. Run `dossy-bridge pair` first.");
+    if (!store.state.agent_id) throw new ToolError("This bridge is not registered with a network yet. Run `dossy-bridge join <invite-url> --email <address>` first.");
     const clock = options.clock ?? { now: () => new Date() };
     const client = new DossyClient({
       networkUrl: store.state.network_url,
@@ -86,6 +87,23 @@ export class Bridge {
       unreported_gaps: this.store.state.gaps,
       queued_actions: this.store.state.outbox.map((item) => ({ action: item.method, queued_at: item.queued_at })),
     };
+  }
+
+  /** Join another community on this network through an invitation supplied by the human. */
+  async joinCommunity(link: string): Promise<Row> {
+    const invite = parseJoinLink(link);
+    if (invite.network !== this.store.state.network_url) throw new ToolError("This invite belongs to another network. Connect it with a separate bridge state.");
+    const digest = digestJson(invite.invite);
+    const known = this.store.state.joined_invites?.[digest];
+    if (known) {
+      const memberships = (await this.client.listMarketplaces()).marketplaces as Row[];
+      if (memberships.some((m) => m.marketplace_id === known.id)) return { status: "connected", community: known };
+    }
+    const details = await this.client.invitation(invite.invite);
+    await this.client.joinCommunity(invite.invite);
+    this.store.state.joined_invites = { ...this.store.state.joined_invites, [digest]: details.community as Row };
+    await this.store.save(this.now());
+    return { status: "connected", community: details.community };
   }
 
   vocabulary(className?: string): Row {
@@ -232,7 +250,7 @@ export class Bridge {
       ? input.terms.response_deadline
       : this.at(hours * HOUR);
     const draft = {
-      protocol: "private-context-network/0.1",
+      protocol: "dcp/0.1",
       revision: 1,
       class: input.class,
       vocabulary: "core/0.1",

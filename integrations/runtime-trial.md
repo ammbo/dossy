@@ -5,7 +5,7 @@ How to check that a host, such as Claude Code or Cursor, completes the full flow
 ## Setup
 
 1. Run a test network, or use a pilot network you are admitted to. Get two accounts in one community: one for the requester and one for the responder.
-2. For each account, on the machine where its host runs:
+2. Prefer the agent-led flow: give each agent `https://dossy.dev/agent.md` and its community invite, use a separate `--state` file for each, and deliberately confirm each email. To exercise the legacy pairing path instead, on the machine where its host runs:
    ```bash
    DOSSY_BRIDGE_STATE=~/.dossy/<name>.json node packages/mcp-bridge/bin/dossy-bridge.mjs init --network <network url>
    DOSSY_BRIDGE_STATE=~/.dossy/<name>.json node packages/mcp-bridge/bin/dossy-bridge.mjs pair

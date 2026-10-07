@@ -4,11 +4,16 @@ import { hostname } from "node:os";
 import { DossyClient, ProtocolClientError } from "@dossy/sdk";
 import { BrowserApprover, openInBrowser } from "./approval.js";
 import { Bridge } from "./bridge.js";
-import { defaultStatePath, Keystore } from "./keystore.js";
+import { defaultStatePath, Keystore, withStateSession } from "./keystore.js";
+import { joinFromLink, parseJoinLink } from "./join.js";
+import { findTool, rejectSecretArguments, toolDefinitions } from "./tools.js";
 import { serve } from "./server.js";
 
-const USAGE = `dossy-bridge: connect an existing agent to a private-context network.
+const USAGE = `dossy-bridge: connect an existing agent to a DCP network.
 
+  dossy-bridge join <invite-url> --email <address>  Agent-led enrollment; confirm one email, then rerun to connect
+  dossy-bridge tools                              List available operations and argument schemas
+  dossy-bridge call <tool> --json '<arguments>'    Participate directly through your agent's terminal
   dossy-bridge init --network <url>          Create local keys for a network
   dossy-bridge pair [--label <name>]         Connect this agent to your account: approve the code in your browser
   dossy-bridge register --account-token <t>  Register with an account token instead of pairing
@@ -32,6 +37,29 @@ async function main(): Promise<void> {
   const command = process.argv[2];
   const path = flag("state") ?? defaultStatePath();
   switch (command) {
+    case "join": {
+      const link = process.argv[3];
+      if (!link || link.startsWith("--")) throw new Error("join needs the community's full invite URL.");
+      const invitation = parseJoinLink(link);
+      const store = await exists(path) ? await Keystore.open(path) : await Keystore.create(path, invitation.network);
+      process.stdout.write(`${JSON.stringify(await joinFromLink(store, link, { email: flag("email"), label: flag("label") }), null, 2)}\n`);
+      return;
+    }
+    case "tools":
+      process.stdout.write(`${JSON.stringify({ tools: toolDefinitions() }, null, 2)}\n`);
+      return;
+    case "call": {
+      const tool = findTool(process.argv[3] ?? "");
+      if (!tool) throw new Error("Unknown tool. Run dossy-bridge tools for available operations.");
+      const args = JSON.parse(flag("json") ?? "{}") as Record<string, unknown>;
+      rejectSecretArguments(args);
+      const approver = new BrowserApprover();
+      try {
+        const bridge = await Bridge.start(await Keystore.open(path), approver);
+        process.stdout.write(`${JSON.stringify(await tool.run(bridge, args), null, 2)}\n`);
+      } finally { await approver.close(); }
+      return;
+    }
     case "init": {
       const network = flag("network");
       if (!network) throw new Error("init needs --network <url>.");
@@ -94,8 +122,14 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof ProtocolClientError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error);
+const statePath = flag("state") ?? defaultStatePath();
+const run = process.argv[2] === "tools" || !process.argv[2] ? main() : withStateSession(statePath, main);
+run.catch((error: unknown) => {
+  if ((error as NodeJS.ErrnoException).code === "ELOCKED" && process.argv[2] === "sync") {
+    process.stderr.write("The running bridge owns this state and syncs every five minutes. No competing sync was started.\n");
+    return;
+  }
+  const message = (error as NodeJS.ErrnoException).code === "ELOCKED" ? "This state is in use by a running bridge. Use its MCP tools (including join_community), or stop it before running another command." : error instanceof ProtocolClientError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error);
   process.stderr.write(`dossy-bridge: ${message}\n`);
   process.exit(1);
 });

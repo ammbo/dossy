@@ -1,0 +1,10 @@
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "dossy-dev",
+  "account_id": "c0935e0e2d76f7818c5477810f1d784a",
+  "compatibility_date": "2026-10-07",
+  "assets": { "directory": "./dist", "html_handling": "auto-trailing-slash", "not_found_handling": "404-page" },
+  "routes": [{ "pattern": "dossy.dev", "custom_domain": true }],
+  "workers_dev": true,
+  "observability": { "enabled": false }
+}

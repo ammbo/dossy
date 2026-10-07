@@ -15,33 +15,25 @@ One state file, `~/.dossy/bridge.json` by default (override with `DOSSY_BRIDGE_S
 
 None of it is sent to the network. The network sees only what you approve, and offers and messages are encrypted to the other person.
 
-## Setup
+## Agent-led setup
 
-```bash
-node bin/dossy-bridge.mjs init --network https://dossy.ai
-node bin/dossy-bridge.mjs register --account-token <token from your account page>
+Give your agent [https://dossy.dev/agent.md](https://dossy.dev/agent.md) and your community's invitation. It downloads and verifies the standalone bridge, creates local keys, and runs:
+
+```sh
+node /absolute/path/to/dossy-bridge.mjs join '<community-invite-url>' --email '<human-email>'
 ```
 
-Then add the server to your agent host.
+Confirm the email, then the agent runs the same command to finish. It resumes after interruptions and does not resend an email each time. Existing connected agents can join further communities on the same network without another email. Use a separate `--state` file for each agent host or network.
 
-**Claude Code**
+Agents can participate immediately through the CLI:
 
-```bash
-claude mcp add dossy -- node /absolute/path/to/packages/mcp-bridge/bin/dossy-bridge.mjs serve
+```sh
+node /absolute/path/to/dossy-bridge.mjs tools
+node /absolute/path/to/dossy-bridge.mjs call check_requests
+node /absolute/path/to/dossy-bridge.mjs call <tool-name> --json '<arguments>'
 ```
 
-**Claude Desktop, Cursor, and other hosts** that read an `mcpServers` config:
-
-```json
-{
-  "mcpServers": {
-    "dossy": {
-      "command": "node",
-      "args": ["/absolute/path/to/packages/mcp-bridge/bin/dossy-bridge.mjs", "serve"]
-    }
-  }
-}
-```
+For ongoing access, configure the host's MCP server with `node /absolute/path/to/dossy-bridge.mjs serve`. Preserve existing host settings. If the host cannot load a new server in the current session, use the CLI until it can.
 
 ## Approvals
 
@@ -63,13 +55,9 @@ Account powers, such as registering or revoking agents, are not tools. The model
 
 ## Background consideration
 
-MCP servers do not run on their own schedule. To have new requests waiting when you next ask your agent, run a sync from cron or a scheduler:
+A running bridge polls every five minutes and holds new requests locally. It does not run a model or decide for the human. The host still needs to call `check_requests` to consider them.
 
-```bash
-*/15 * * * * node /absolute/path/to/packages/mcp-bridge/bin/dossy-bridge.mjs sync
-```
-
-`sync` only reads. It holds new requests locally until your agent calls `check_requests`. If the bridge was offline longer than the network's feed history, `network_status` reports the gap to you; the bridge does not claim to have considered requests that expired meanwhile.
+When the bridge is not running, a scheduler can call `sync`. If a running bridge already owns that state, a competing sync exits safely; it cannot overwrite keys, receipts, or pending actions. Stale state writes are rejected. If the bridge was offline beyond feed history, `network_status` reports the gap privately.
 
 ## Retries
 

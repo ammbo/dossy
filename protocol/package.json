@@ -1,14 +1,32 @@
 {
   "name": "@dossy/protocol",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "exports": {
-    ".": "./index.ts",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./package.json": "./package.json",
     "./bounds.json": "./bounds.json",
     "./vocabularies/*": "./vocabularies/*",
     "./schemas/*": "./schemas/*",
     "./openapi.yaml": "./openapi.yaml"
+  },
+  "license": "Apache-2.0",
+  "files": [
+    "dist",
+    "schemas",
+    "vocabularies",
+    "bounds.json",
+    "openapi.yaml",
+    "SPEC.md",
+    "CHANGELOG.md",
+    "LICENSE.md",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

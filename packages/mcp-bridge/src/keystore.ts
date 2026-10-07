@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { exportJWK, generateKeyPair, importJWK, type JWK } from "jose";
+import lockfile from "proper-lockfile";
 import { randomId, type Gap, type MarketCursor, type PublicJwk, type SeenRecord, type SyncStore } from "@dossy/sdk";
 
 /** A key the bridge holds for one object, kept until the object can no longer need it. */
@@ -33,9 +34,12 @@ export type PendingSend = {
 
 export type BridgeState = {
   version: 1;
+  revision?: number;
   network_url: string;
   issuer?: string;
   agent_id?: string;
+  enrollment?: { id?: string; expires_at: string; community: Record<string, unknown>; invite_digest: string };
+  joined_invites?: Record<string, Record<string, unknown>>;
   signing_jwk: JWK;
   keys: {
     /** request_id → the request's reply key. Decrypts offers. */
@@ -65,6 +69,7 @@ export function defaultStatePath(): string {
  * It lives in one file readable only by the user. Nothing here is sent to the network.
  */
 export class Keystore implements SyncStore {
+  private saving: Promise<void> = Promise.resolve();
   private constructor(
     readonly path: string,
     readonly state: BridgeState,
@@ -107,13 +112,27 @@ export class Keystore implements SyncStore {
   }
 
   /** Writes atomically with owner-only permissions. */
-  async save(now = new Date()): Promise<void> {
+  save(now = new Date()): Promise<void> {
+    const operation = this.saving.then(() => this.write(now));
+    this.saving = operation.catch(() => {});
+    return operation;
+  }
+
+  private async write(now: Date): Promise<void> {
     this.prune(now);
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    const temporary = `${this.path}.${randomId(6)}.tmp`;
-    await writeFile(temporary, JSON.stringify(this.state, null, 2), { mode: 0o600 });
-    await rename(temporary, this.path);
-    await chmod(this.path, 0o600);
+    const release = await lockfile.lock(this.path, { realpath: false, lockfilePath: `${this.path}.write.lock`, retries: { retries: 20, minTimeout: 20, maxTimeout: 100 } });
+    try {
+      let saved: BridgeState | undefined;
+      try { saved = JSON.parse(await readFile(this.path, "utf8")) as BridgeState; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      if ((saved?.revision ?? 0) !== (this.state.revision ?? 0)) throw new Error("Bridge state changed in another process. Reload it before continuing; no keys were overwritten.");
+      this.state.revision = (this.state.revision ?? 0) + 1;
+      const temporary = `${this.path}.${randomId(6)}.tmp`;
+      await writeFile(temporary, JSON.stringify(this.state, null, 2), { mode: 0o600 });
+      await rename(temporary, this.path);
+      await chmod(this.path, 0o600);
+    } finally { await release(); }
   }
 
   publicSigningJwk(): PublicJwk {
@@ -160,4 +179,11 @@ export class Keystore implements SyncStore {
     this.state.gaps = this.state.gaps.slice(-100);
     this.state.digest = (this.state.digest ?? []).filter((item) => Date.parse(String(item.expires_at)) > now.getTime()).slice(-200);
   }
+}
+
+/** One process owns a state's read/modify/write lifecycle. A running server also schedules sync. */
+export async function withStateSession<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const release = await lockfile.lock(path, { realpath: false, lockfilePath: `${path}.session.lock`, stale: 60_000, retries: 0 });
+  try { return await fn(); } finally { await release(); }
 }

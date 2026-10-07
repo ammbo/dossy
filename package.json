@@ -7,10 +7,12 @@
   },
   "packageManager": "pnpm@8.7.5",
   "scripts": {
-    "test": "vitest run",
+    "test": "pnpm build:packages && vitest run",
     "typecheck": "tsc --noEmit",
     "check-boundaries": "node scripts/check-boundaries.mjs",
-    "mcp": "tsx packages/mcp-bridge/src/main.ts"
+    "mcp": "tsx packages/mcp-bridge/src/main.ts",
+    "build:packages": "node scripts/build-packages.mjs",
+    "build:site": "node scripts/build-site.mjs"
   },
   "devDependencies": {
     "@dossy/conformance": "workspace:*",
@@ -20,6 +22,8 @@
     "@types/node": "^24.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "esbuild": "^0.28.2",
+    "marked": "^18.1.0"
   }
 }

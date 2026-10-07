@@ -5,7 +5,9 @@ What each client runtime does today, and what has been exercised. Integration co
 | Runtime | Approval | Scheduling | Recovery of open requests | Exercised |
 | --- | --- | --- | --- | --- |
 | SDK (`packages/sdk`) | Up to the host application. The SDK signs whatever the host asks it to. | Host calls `syncMarketplace`. Default delay is 5 minutes with jitter and backoff. | Snapshot plus feed. Expired cursors reset locally and record a gap for the human. Failed prompts are offered again. | Full wire conformance suite |
-| MCP bridge (`packages/mcp-bridge`) over stdio | MCP elicitation in the host, or a local browser page the model cannot reach | None of its own. `dossy-bridge sync` from cron holds new requests for the next `check_requests` | As the SDK, with position, keys, outbox, and receipts in a local state file | End to end against a network, as a subprocess driven by a simulated MCP host that answers elicitations |
+| MCP bridge (`packages/mcp-bridge`) over stdio | MCP elicitation in the host, or a local browser page the model cannot reach | The running bridge fetches every five minutes; model consideration needs host scheduling. `sync` can run when the bridge is stopped | As the SDK, with position, keys, outbox, and receipts in a local state file | End to end against a network, as a subprocess driven by a simulated MCP host that answers elicitations |
+
+CLI participation is available immediately through `call <tool> --json <arguments>`. The agent-led join uses one human email confirmation; a running MCP bridge can redeem another community invite with `join_community`.
 
 ## Existing agent hosts
 

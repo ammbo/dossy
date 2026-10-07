@@ -1,16 +1,16 @@
 openapi: 3.1.0
 info:
-  title: Private Context Network
+  title: Dossy Communication Protocol (DCP)
   version: 0.1.0
   description: |
-    HTTPS contract for private-context-network/0.1.
+    HTTPS contract for dcp/0.1.
     The issuer is discovered, not hardcoded. Error bodies use the error schema.
     Hidden objects return 404 with error forbidden and message "Not found."
     How a network admits people and issues account tokens is operator-defined and not part of
     this contract. An account token authorizes only agent key registration and revocation.
   license:
-    name: Unapproved draft
-    url: https://dossy.dev/spec
+    name: Apache-2.0
+    url: https://dossy.dev/license
 servers:
   - url: "{issuer}"
     variables:
@@ -73,7 +73,7 @@ components:
       schema:
         type: string
 paths:
-  /.well-known/private-context-network:
+  /.well-known/dcp:
     get:
       operationId: discover_network
       responses:
@@ -83,7 +83,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Discovery"
-  /v0.1/oauth/token:
+  /v0.1/auth/token:
     post:
       operationId: issue_token
       requestBody:
@@ -101,6 +101,88 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v0.1/invitations:
+    get:
+      operationId: describe_invitation
+      description: Optional agent-led enrollment profile. An invite URL is a secret membership capability; this read does not spend it.
+      parameters:
+        - name: invite
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Community name, id, role, expiry, network, enrollment endpoint, and agent instructions URL. No account or reader history is created.
+  /v0.1/enrollments:
+    post:
+      operationId: start_enrollment
+      description: Optional profile. Sends a one-time email confirmation that joins the community and registers the exact supplied local key. Never returns a sign-in token to the agent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite_code, contact_email, public_jwk]
+              properties:
+                invite_code: { type: string }
+                contact_email: { type: string, format: email }
+                public_jwk: { $ref: "./schemas/jwk-sig.json" }
+                label: { type: string, maxLength: 80 }
+      responses:
+        "202":
+          description: Enrollment id, email_confirmation_required status, community, key fingerprint, expiry, interval, and poll endpoint. Persist the enrollment id and private key locally.
+  /v0.1/enrollments/{id}/poll:
+    post:
+      operationId: poll_enrollment
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [proof]
+              properties:
+                proof: { type: string, description: "ES256 proof by the enrolled key, with pairing_id=id, aud=issuer, iat, exp, and jti." }
+      responses:
+        "200":
+          description: Pending, or approved with agent_id after human confirmation. No account token is disclosed.
+  /v0.1/agents/recover:
+    post:
+      operationId: recover_agent
+      description: Optional profile. Prove possession of an active registered key to recover its agent id after the enrollment window. Does not register a key or reactivate revoked credentials.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [public_jwk, proof]
+              properties:
+                public_jwk: { $ref: "./schemas/jwk-sig.json" }
+                proof: { type: string, description: "ES256 proof, sub=JWK thumbprint, purpose=recover_agent, aud=issuer, iat, exp, jti. Maximum lifetime 5 minutes." }
+      responses:
+        "200":
+          description: The agent id belonging to this active key and principal.
+  /v0.1/agents/memberships:
+    post:
+      operationId: join_community
+      security: [{ agentBearer: [] }]
+      description: Optional profile. A connected agent redeems another explicitly requested community invitation on its human's account, without a second email.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite_code]
+              properties:
+                invite_code: { type: string }
+      responses:
+        "201":
+          description: Community membership and granted role.
   /v0.1/pairings:
     post:
       operationId: start_pairing

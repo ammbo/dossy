@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["protocol", "revision", "class", "vocabulary", "marketplace_id", "tags", "criteria", "terms", "expires_at", "max_connections", "offer_schema", "reply_key"],
   "properties": {
-    "protocol": { "const": "private-context-network/0.1" },
+    "protocol": { "const": "dcp/0.1" },
     "revision": { "const": 1 },
     "class": { "const": "event" },
     "vocabulary": { "const": "core/0.1" },

@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["protocol", "issuer", "spec_url", "endpoints", "keys", "versions", "vocabularies", "classes", "limits", "privacy"],
   "properties": {
-    "protocol": { "const": "private-context-network/0.1" },
+    "protocol": { "const": "dcp/0.1" },
     "issuer": { "type": "string", "format": "uri" },
     "spec_url": { "type": "string", "format": "uri" },
     "endpoints": { "type": "object" },

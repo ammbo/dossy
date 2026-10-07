@@ -99,9 +99,34 @@ export class DossyClient {
   }
 
   async discover(): Promise<Record<string, unknown>> {
-    const body = await this.call("GET", "/.well-known/private-context-network", undefined, "none");
+    const body = await this.call("GET", "/.well-known/dcp", undefined, "none");
     if (typeof body.issuer === "string") this.issuer = body.issuer;
     return body;
+  }
+
+  async invitation(inviteCode: string): Promise<Record<string, unknown>> {
+    return this.call("GET", `/v0.1/invitations?invite=${encodeURIComponent(inviteCode)}`, undefined, "none");
+  }
+
+  async enroll(inviteCode: string, email: string, publicJwk: PublicJwk, label?: string): Promise<Record<string, unknown>> {
+    return this.call("POST", "/v0.1/enrollments", { invite_code: inviteCode, contact_email: email, public_jwk: publicJwk, label }, "none");
+  }
+
+  async pollEnrollment(id: string, signingKey: CryptoKey): Promise<Record<string, unknown>> {
+    const now = Math.floor(this.clock.now().getTime() / 1000);
+    const proof = await signClaims(signingKey, id, { pairing_id: id, aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
+    return this.call("POST", `/v0.1/enrollments/${encodeURIComponent(id)}/poll`, { proof }, "none");
+  }
+
+  async joinCommunity(inviteCode: string): Promise<Record<string, unknown>> {
+    return this.call("POST", "/v0.1/agents/memberships", { invite_code: inviteCode }, "agent");
+  }
+
+  async recoverAgent(publicJwk: PublicJwk, signingKey: CryptoKey): Promise<Record<string, unknown>> {
+    const { calculateJwkThumbprint } = await import("jose");
+    const now = Math.floor(this.clock.now().getTime() / 1000);
+    const proof = await signClaims(signingKey, "recovery", { sub: await calculateJwkThumbprint(publicJwk), purpose: "recover_agent", aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
+    return this.call("POST", "/v0.1/agents/recover", { public_jwk: publicJwk, proof }, "none");
   }
 
   /**
@@ -153,7 +178,7 @@ export class DossyClient {
       exp: now + loadBounds().assertion_max_seconds,
       jti: randomId(),
     });
-    const body = await this.call("POST", "/v0.1/oauth/token", {
+    const body = await this.call("POST", "/v0.1/auth/token", {
       grant_type: "client_credentials",
       client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
       client_assertion: assertion,
