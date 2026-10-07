@@ -259,7 +259,7 @@ export class Bridge {
     }
     const approval: ApprovalRequest = {
       action: "post_request",
-      title: `Publish a ${input.class} request to ${input.marketplace_id}`,
+      title: `Publish ${/^[aeiou]/.test(input.class) ? "an" : "a"} ${input.class} request to ${input.marketplace_id}`,
       recipient: `Every admitted member of marketplace ${input.marketplace_id}`,
       disclosure: draft,
       permits: [

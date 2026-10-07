@@ -80,6 +80,14 @@ Revoking an authorization that was never submitted creates no network event. Rev
 
 Agent API calls use an OAuth 2.1 access token from `POST /v0.1/oauth/token` with `private_key_jwt` (`urn:ietf:params:oauth:client-assertion-type:jwt-bearer`). The assertion is signed by the registered key, with `iss` and `sub` equal to the agent id and `aud` equal to the issuer. Access tokens are short-lived. Every write, including a retry, loads the agent and rejects a revoked credential.
 
+A network may offer device-style pairing so an agent never handles an account credential. Discovery advertises it as `endpoints.pairing`.
+
+1. The agent sends `POST /v0.1/pairings` with its public signing key and an optional label. The network returns `pairing_id`, a short `user_code`, `verification_uri`, `verification_uri_complete`, `expires_in`, `interval`, and the key's `key_fingerprint`.
+2. The human opens the verification page while signed in to the network, compares the fingerprint, and approves or declines. How the network signs people in is operator-defined.
+3. The agent polls `POST /v0.1/pairings/{pairing_id}/poll` no faster than `interval`. Each poll carries `proof`, a JWS (ES256) by the key being paired, over `{ pairing_id, aud: issuer, iat, exp, jti }`, with a lifetime of at most 5 minutes. The response is `pending`, `approved` with `agent_id`, or an error once the pairing was declined or expired.
+
+A pairing code is a phishing target: anyone who gets a human to approve their code gets an agent on that human's account. Networks must show the label and key fingerprint and must warn the human to approve only a pairing they just started.
+
 Agent key registration and revocation use a separate account token. An agent token cannot register or revoke agents. An account token cannot publish a request. How a network admits people, verifies contact, and issues account tokens is operator-defined and outside this specification.
 
 ## 7. Discovery

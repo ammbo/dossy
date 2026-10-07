@@ -113,7 +113,9 @@ export class BrowserApprover implements Approver {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
-      "referrer-policy": "no-referrer",
+        // Not no-referrer: under that policy browsers send `Origin: null` on form posts, and the
+      // origin check below would refuse the human's own decision.
+      "referrer-policy": "same-origin",
     };
     const match = /^\/approve\/([A-Za-z0-9_-]{22})$/.exec(request.url ?? "");
     const pending = match ? this.pending.get(match[1] as string) : undefined;
@@ -177,16 +179,16 @@ function approvalPage(approval: ApprovalRequest, nonce: string): string {
 <button name="decision" value="approve">Approve and send</button><button name="decision" value="decline">Decline</button></form>`);
 }
 
-async function openInBrowser(url: string): Promise<void> {
+export async function openInBrowser(url: string): Promise<void> {
   if (process.env.DOSSY_BROWSER === "none") {
-    process.stderr.write(`Approve or decline at ${url}\n`);
+    process.stderr.write(`Open ${url}\n`);
     return;
   }
   const [command, args] = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
   await new Promise<void>((resolve) => {
     const child = spawn(command as string, args as string[], { stdio: "ignore", detached: true });
     child.on("error", () => {
-      process.stderr.write(`Approve or decline at ${url}\n`);
+      process.stderr.write(`Open ${url}\n`);
       resolve();
     });
     child.on("spawn", () => {

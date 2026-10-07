@@ -34,6 +34,8 @@ export interface ConformanceTarget {
   advanceTime?(ms: number): Promise<void>;
   /** Shrinks list page sizes so paging paths run with few requests. */
   setPageSize?(size: number): Promise<void>;
+  /** Approves a pending agent pairing as the party's human would, while signed in. */
+  approvePairing?(party: Party, userCode: string): Promise<void>;
   close(): Promise<void>;
 }
 

@@ -10,6 +10,7 @@
 - `bounds.json` replaces `limits.json` and holds protocol bounds only. Budgets and retention are operator policy, published through discovery and the marketplace listing.
 - Account admission and administration routes left the protocol OpenAPI. They are operator-defined.
 - Conformance is a black-box wire suite run through a `ConformanceTarget` adapter.
+- Optional device-style agent pairing (`endpoints.pairing`), with proof of key possession on every poll.
 
 ## 0.1.0
 

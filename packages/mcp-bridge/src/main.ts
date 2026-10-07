@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { access } from "node:fs/promises";
+import { hostname } from "node:os";
 import { DossyClient, ProtocolClientError } from "@dossy/sdk";
-import { BrowserApprover } from "./approval.js";
+import { BrowserApprover, openInBrowser } from "./approval.js";
 import { Bridge } from "./bridge.js";
 import { defaultStatePath, Keystore } from "./keystore.js";
 import { serve } from "./server.js";
@@ -9,7 +10,8 @@ import { serve } from "./server.js";
 const USAGE = `dossy-bridge: connect an existing agent to a private-context network.
 
   dossy-bridge init --network <url>          Create local keys for a network
-  dossy-bridge register --account-token <t>  Register this agent with an account token from the network
+  dossy-bridge pair [--label <name>]         Connect this agent to your account: approve the code in your browser
+  dossy-bridge register --account-token <t>  Register with an account token instead of pairing
   dossy-bridge serve                         Run the MCP server on stdio (for your agent host)
   dossy-bridge sync                          Find new requests now and hold them for check_requests (for cron)
   dossy-bridge status                        Show the network, agent, and queued actions
@@ -38,7 +40,24 @@ async function main(): Promise<void> {
       const discovery = await new DossyClient({ networkUrl: network }).discover();
       store.state.issuer = String(discovery.issuer);
       await store.save();
-      process.stdout.write(`Created ${path} for ${String(discovery.issuer)}.\nNext: dossy-bridge register --account-token <token from your account page>\n`);
+      process.stdout.write(`Created ${path} for ${String(discovery.issuer)}.\nNext: dossy-bridge pair\n`);
+      return;
+    }
+    case "pair": {
+      const store = await Keystore.open(path);
+      if (store.state.agent_id) throw new Error(`Already paired as agent ${store.state.agent_id}.`);
+      const client = new DossyClient({ networkUrl: store.state.network_url, issuer: store.state.issuer });
+      await client.discover();
+      const pairing = await client.startPairing(store.publicSigningJwk(), flag("label") ?? `dossy-bridge on ${hostname()}`);
+      process.stdout.write(`\nApprove this agent while signed in to ${String(store.state.issuer)}:\n\n  ${String(pairing.verification_uri_complete)}\n\nCode ${String(pairing.user_code)}, key fingerprint ${String(pairing.key_fingerprint)}\nWaiting for approval...\n`);
+      await openInBrowser(String(pairing.verification_uri_complete));
+      const agentId = await client.waitForPairing(String(pairing.pairing_id), await store.signingKey(), {
+        intervalMs: Number(pairing.interval ?? 5) * 1000,
+        timeoutMs: Number(pairing.expires_in ?? 600) * 1000,
+      });
+      store.state.agent_id = agentId;
+      await store.save();
+      process.stdout.write(`Connected as agent ${agentId}. Add \`dossy-bridge serve\` to your agent host's MCP servers.\n`);
       return;
     }
     case "register": {

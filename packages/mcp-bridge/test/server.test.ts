@@ -113,7 +113,10 @@ describe("browser approval page", () => {
     const approver = new BrowserApprover({ open: async (address) => { url = address; }, timeoutMs: 5000 });
     const decision = approver.request({ action: "submit_offer", title: "Reply", recipient: "The requester", disclosure: { interest: true, note: "<script>x</script>" }, permits: ["Read until tomorrow"] });
     while (!url) await new Promise((resolve) => setTimeout(resolve, 5));
-    const page = await (await fetch(url)).text();
+    const response = await fetch(url);
+    // no-referrer would make browsers send `Origin: null` when the human submits, and the page would refuse them.
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
+    const page = await response.text();
     expect(page).toContain("&lt;script&gt;x&lt;/script&gt;");
     expect(page).not.toContain("<script>x</script>");
     const nonce = /name="nonce" value="([^"]+)"/.exec(page)?.[1] ?? "";

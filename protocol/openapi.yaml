@@ -101,6 +101,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v0.1/pairings:
+    post:
+      operationId: start_pairing
+      description: Propose an agent signing key for a signed-in human to approve. Optional; advertised as endpoints.pairing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [public_jwk]
+              properties:
+                public_jwk:
+                  $ref: "./schemas/jwk-sig.json"
+                label:
+                  type: string
+                  maxLength: 80
+      responses:
+        "201":
+          description: Pairing started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pairing_id, user_code, verification_uri, verification_uri_complete, expires_in, interval, key_fingerprint]
+        "400":
+          description: Not a public P-256 signing key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v0.1/pairings/{id}/poll:
+    post:
+      operationId: poll_pairing
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [proof]
+              properties:
+                proof:
+                  type: string
+                  description: Compact JWS (ES256) by the key being paired over pairing_id, aud, iat, exp, and jti.
+      responses:
+        "200":
+          description: pending, or approved with agent_id
+        "401":
+          description: Proof not signed by the key being paired
+        "403":
+          description: The human declined
+        "410":
+          description: The pairing expired
   /v0.1/agents:
     post:
       operationId: register_agent

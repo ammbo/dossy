@@ -104,6 +104,36 @@ export class DossyClient {
     return body;
   }
 
+  /**
+   * Starts device-style pairing: proposes this agent's public signing key and returns a short code
+   * the human approves while signed in to the network. No account token is needed on the agent.
+   */
+  async startPairing(publicJwk: PublicJwk, label?: string): Promise<Record<string, unknown>> {
+    return this.call("POST", "/v0.1/pairings", { public_jwk: publicJwk, ...(label ? { label } : {}) }, "none");
+  }
+
+  /** Asks whether the human approved, proving possession of the key being paired. */
+  async pollPairing(pairingId: string, signingKey: CryptoKey): Promise<Record<string, unknown>> {
+    const now = Math.floor(this.clock.now().getTime() / 1000);
+    const proof = await signClaims(signingKey, pairingId, { pairing_id: pairingId, aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
+    return this.call("POST", `/v0.1/pairings/${pairingId}/poll`, { proof }, "none");
+  }
+
+  /** Polls until the human approves or declines, or the pairing expires. Returns the new agent id. */
+  async waitForPairing(pairingId: string, signingKey: CryptoKey, options: { intervalMs?: number; timeoutMs?: number } = {}): Promise<string> {
+    const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
+    for (;;) {
+      const status = await this.pollPairing(pairingId, signingKey);
+      if (status.status === "approved" && typeof status.agent_id === "string") {
+        this.agentId = status.agent_id;
+        this.signingKey = signingKey;
+        return status.agent_id;
+      }
+      if (Date.now() >= deadline) throw new ProtocolClientError("expired", "Pairing was not approved in time.", 410);
+      await pause(options.intervalMs ?? 5000);
+    }
+  }
+
   /** Registers an agent signing key. Authorized by an account token the operator issued. */
   async registerAgent(publicJwk: PublicJwk): Promise<Record<string, unknown>> {
     return this.call("POST", "/v0.1/agents", { public_jwk: publicJwk }, "account");
