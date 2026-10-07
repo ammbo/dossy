@@ -15,7 +15,14 @@ export type OutboxItem = {
   path: string;
 };
 
-export class MemoryStore {
+/** Local discovery state: position per marketplace, deduplication, and gaps to tell the human about. */
+export interface SyncStore {
+  cursors: Record<string, MarketCursor>;
+  seen: Record<string, SeenRecord>;
+  gaps: Gap[];
+}
+
+export class MemoryStore implements SyncStore {
   cursors: Record<string, MarketCursor> = {};
   seen: Record<string, SeenRecord> = {};
   gaps: Gap[] = [];

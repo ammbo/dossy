@@ -82,7 +82,7 @@ export async function verifyClaims(
   now: Date,
   maxLifetimeSeconds: number,
 ): Promise<Record<string, unknown>> {
-  const { payload, protectedHeader } = await compactVerify(jws, publicKey);
+  const { payload, protectedHeader } = await compactVerify(jws, publicKey, { algorithms: ["ES256"] });
   if (protectedHeader.alg !== "ES256") throw new Error("Unexpected signature algorithm.");
   const claims = JSON.parse(new TextDecoder().decode(payload)) as Record<string, unknown>;
   const iat = claims.iat;
@@ -104,8 +104,12 @@ export async function encryptJson(publicJwk: PublicJwk, plaintext: unknown, pcn:
     .encrypt(key);
 }
 
-export async function decryptJson<T>(privateKey: CryptoKey, jwe: string, expected: PcnHeader): Promise<T> {
-  const { plaintext, protectedHeader } = await compactDecrypt(jwe, privateKey);
+/**
+ * Decrypts and checks the payload binding. Every field given in `expected` must match. A recipient
+ * that cannot know a field in advance, such as the sender's operation id, leaves it out.
+ */
+export async function decryptJson<T>(privateKey: CryptoKey, jwe: string, expected: Partial<PcnHeader>): Promise<T> {
+  const { plaintext, protectedHeader } = await compactDecrypt(jwe, privateKey, { keyManagementAlgorithms: ["ECDH-ES"], contentEncryptionAlgorithms: ["A256GCM"] });
   if (protectedHeader.alg !== "ECDH-ES" || protectedHeader.enc !== "A256GCM") {
     throw new Error("Unexpected encryption algorithm.");
   }

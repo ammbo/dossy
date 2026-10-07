@@ -311,7 +311,7 @@ export class DossyClient {
     return encryptJson(input.replyKey, input.plaintext, pcn);
   }
 
-  async openOffer(privateKey: CryptoKey, ciphertext: string, expected: PcnHeader, declaredFields: string[]): Promise<Record<string, unknown>> {
+  async openOffer(privateKey: CryptoKey, ciphertext: string, expected: Partial<PcnHeader>, declaredFields: string[]): Promise<Record<string, unknown>> {
     const plaintext = await decryptJson<Record<string, unknown>>(privateKey, ciphertext, expected);
     assertSchema("https://dossy.dev/schemas/offer-plaintext.json", plaintext);
     const keys = Object.keys(plaintext);
@@ -349,7 +349,7 @@ export class DossyClient {
   async openMessage(
     privateKey: CryptoKey,
     ciphertext: string,
-    expected: PcnHeader,
+    expected: Partial<PcnHeader> & { message_type: "clarification" | "handoff" },
   ): Promise<Record<string, unknown>> {
     const plaintext = await decryptJson<Record<string, unknown>>(privateKey, ciphertext, expected);
     assertSchema(`https://dossy.dev/schemas/message-${expected.message_type}.json`, plaintext);

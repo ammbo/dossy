@@ -22,7 +22,7 @@ Networks publish requester reputation from submitted transactions only: posted, 
 | `protocol/openapi.yaml` | The HTTPS contract |
 | `protocol/bounds.json` | Protocol bounds every network enforces |
 | `packages/sdk` | TypeScript client: validation, RFC 8785 digests, signing, encryption, discovery sync, and idempotent retries. It uses no Node built-ins, so it runs in Node, Deno, Bun, browsers, and edge runtimes |
-| `packages/mcp-bridge` | A user-side MCP server that connects an existing agent to a network. Keys stay on the user's machine. Being rebuilt; see `integrations/capability-matrix.md` |
+| `packages/mcp-bridge` | A user-side MCP server that connects an agent you already use to a network. Keys, approvals, and receipts stay on your machine, and every outward action needs your approval in a prompt the model cannot answer |
 | `conformance/` | Protocol fixtures, plus a black-box wire suite any network can run against itself |
 | `integrations/` | Runtime capability matrix |
 

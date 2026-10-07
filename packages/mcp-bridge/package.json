@@ -1,6 +1,6 @@
 {
   "name": "@dossy/mcp-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -8,6 +8,14 @@
   },
   "dependencies": {
     "@dossy/sdk": "workspace:*",
-    "jose": "^6.0.11"
+    "jose": "^6.0.11",
+    "tsx": "^4.20.0"
+  },
+  "bin": {
+    "dossy-bridge": "./bin/dossy-bridge.mjs"
+  },
+  "devDependencies": {
+    "@dossy/conformance": "workspace:*",
+    "vitest": "^3.2.0"
   }
 }

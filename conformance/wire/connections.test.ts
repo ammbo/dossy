@@ -24,13 +24,13 @@ suite("connections", () => {
     expect(confirmed.state).toBe("established");
 
     const operationId = randomId();
-    const binding: PcnHeader = {
+    const binding: PcnHeader & { message_type: "handoff" } = {
       origin: String(confirmed.origin),
       request_id: String(confirmed.request_id),
       request_digest: String(confirmed.request_digest),
       connection_id: String(confirmed.connection_id),
       sender_role: "responder",
-      message_type: "handoff",
+      message_type: "handoff" as const,
       operation_id: operationId,
       exp: String(confirmed.coordination_expires_at),
     };

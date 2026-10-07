@@ -1,5 +1,5 @@
 import { ProtocolClientError, type DossyClient } from "./client.js";
-import type { MemoryStore } from "./store.js";
+import type { SyncStore } from "./store.js";
 
 type Listed = { request_id: string; document_digest?: string; state: string };
 type Page = {
@@ -26,7 +26,7 @@ export type SyncResult = {
 export async function syncMarketplace(
   client: DossyClient,
   marketplaceId: string,
-  store: MemoryStore,
+  store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
 ): Promise<SyncResult> {
   const result: RunState = { prompted: 0, failed: 0, attempted: new Set() };
@@ -57,7 +57,7 @@ type RunState = SyncResult & { attempted: Set<string> };
 async function syncOnce(
   client: DossyClient,
   marketplaceId: string,
-  store: MemoryStore,
+  store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
   result: RunState,
 ): Promise<void> {
@@ -88,7 +88,7 @@ async function syncOnce(
 async function consider(
   client: DossyClient,
   marketplaceId: string,
-  store: MemoryStore,
+  store: SyncStore,
   item: Listed,
   onNew: (request: Record<string, unknown>) => Promise<void>,
   result: RunState,
@@ -109,7 +109,7 @@ async function consider(
 }
 
 async function prompt(
-  store: MemoryStore,
+  store: SyncStore,
   key: string,
   request: Record<string, unknown>,
   onNew: (request: Record<string, unknown>) => Promise<void>,
@@ -131,7 +131,7 @@ async function prompt(
 async function retryPending(
   client: DossyClient,
   marketplaceId: string,
-  store: MemoryStore,
+  store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
   result: RunState,
 ): Promise<void> {
