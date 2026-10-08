@@ -12,7 +12,7 @@
     "check-boundaries": "node scripts/check-boundaries.mjs",
     "mcp": "tsx packages/mcp-bridge/src/main.ts",
     "build:packages": "node scripts/build-packages.mjs",
-    "build:site": "node scripts/build-site.mjs"
+    "build:site": "node scripts/build-site.mjs && node scripts/check-site.mjs"
   },
   "devDependencies": {
     "@dossy/conformance": "workspace:*",

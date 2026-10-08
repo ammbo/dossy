@@ -1,6 +1,6 @@
 # Dossy MCP bridge
 
-A user-side MCP server that connects an agent you already use to a private-context network. It runs on your machine, holds your keys, and asks you before anything leaves.
+A user-side CLI and MCP server that connects an agent you already use to a private-context network. It runs in your trusted environment, holds your private keys, and asks before publishing content or sending a response.
 
 It is an adapter, not an assistant. It has no memory of its own, reads no inbox, and stores no conversations. Your agent decides what is worth your attention. The bridge makes sure only what you approve is sent.
 
@@ -13,7 +13,7 @@ One state file, `~/.dossy/bridge.json` by default (override with `DOSSY_BRIDGE_S
 - Approved actions waiting to be sent
 - A receipt for every approval and decline: what was shown, when, and through which channel
 
-None of it is sent to the network. The network sees only what you approve, and offers and messages are encrypted to the other person.
+Private keys and local receipts are not uploaded. Joining shares your email and public key with the network; participation shares request documents, submitted control records, and routing metadata. Approved offers and messages are encrypted to the other person. The state file has owner-only permissions but is not encrypted at rest.
 
 ## Agent-led setup
 
@@ -37,21 +37,26 @@ For ongoing access, configure the host's MCP server with `node /absolute/path/to
 
 ## Approvals
 
-Every outward action shows you the exact content, the recipient, and what it permits. You approve or decline it in a prompt the model cannot answer:
+Content disclosures and transaction changes show you the exact content, the recipient, and what they permit. You approve or decline through a human UI separate from ordinary model tool arguments:
 
 - **In your host**, through an MCP elicitation, when the host supports it.
 - **In your browser** otherwise. The bridge serves the approval on `127.0.0.1` and opens it itself. The page address carries a one-time token that is never given to the model.
 
 A decline sends nothing and leaves no trace on the network. Nothing is approved automatically. There is no setting for that.
 
+This requires a trusted host and endpoint. The bridge does not sandbox an agent with unrestricted access to your user account or browser. Signatures establish key possession, not independent proof of human consent. Published requests are visible to the community; encryption applies to offers and connection messages. See the [privacy and trust model](https://dossy.dev/privacy).
+
 ## Tools
 
-| Tool | Sends anything? |
+| Tool | Effect |
 | --- | --- |
-| `network_status`, `get_vocabulary`, `check_requests`, `get_request`, `get_reputation`, `list_activity`, `read_messages` | No. Reads are not recorded by the network |
+| `network_status`, `get_vocabulary`, `check_requests`, `get_request`, `get_reputation`, `list_activity`, `read_messages` | Reads or local inspection. No response is published; reads leave no retained network reader history |
+| `join_community` | Redeems the supplied invitation under the human's explicit instruction; no new email for an already registered agent on the same network |
 | `publish_request`, `offer_interest`, `accept_offer`, `confirm_connection`, `send_handoff`, `send_clarification`, `withdraw`, `revoke_authority`, `report_abuse` | Only after you approve the exact content |
 
 Account powers, such as registering or revoking agents, are not tools. The model cannot use them.
+
+Reads make authenticated HTTP calls. Bridge startup can also retry previously approved queued actions. Run `tools` for schemas or use the [generated tool reference](https://dossy.dev/tools).
 
 ## Background consideration
 

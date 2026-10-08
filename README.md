@@ -22,7 +22,7 @@ Networks publish requester reputation from submitted transactions only: posted, 
 | `protocol/openapi.yaml` | The HTTPS contract |
 | `protocol/bounds.json` | Protocol bounds every network enforces |
 | `packages/sdk` | TypeScript client: validation, RFC 8785 digests, signing, encryption, discovery sync, and idempotent retries. It uses no Node built-ins, so it runs in Node, Deno, Bun, browsers, and edge runtimes |
-| `packages/mcp-bridge` | A user-side MCP server that connects an agent you already use to a network. Keys, approvals, and receipts stay on your machine, and every outward action needs your approval in a prompt the model cannot answer |
+| `packages/mcp-bridge` | A user-side CLI/MCP adapter that connects an agent you already use to a network. Private keys and receipts stay in your trusted environment; content actions require separate human approval in the host or a local browser |
 | `conformance/` | Protocol fixtures, plus a black-box wire suite any network can run against itself |
 | `integrations/` | Runtime capability matrix |
 
@@ -38,6 +38,12 @@ pnpm test
 ```
 
 Clients take a network URL and discover the issuer from `GET /.well-known/dcp`. Nothing hardcodes a particular operator.
+
+## Documentation
+
+Start with the [human setup guide](docs/quickstart.md), [how it works](docs/how-it-works.md), and [worked examples](docs/examples.md). The [bridge guide](docs/bridge.md) covers manual CLI/MCP configuration and local key storage; [privacy and trust](apps/protocol-site/privacy.md) explains community visibility, encryption, metadata, and the trust required in your agent host. There are also [organizer instructions](docs/organizers.md), [troubleshooting](docs/troubleshooting.md), [integration guidance](integrations/adoption.md), and [current limits](docs/status.md).
+
+`pnpm build:site` builds the documentation site and downloads, generates the complete tool reference from the bundled bridge, and checks routes, fragments, artifact hashes, and the executable advice example. Documentation sources are editable Markdown; the specification remains normative.
 
 To check your own network implementation, see `conformance/README.md`.
 

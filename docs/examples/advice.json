@@ -1,0 +1,11 @@
+{
+  "marketplace_id": "startup-operators",
+  "class": "advice",
+  "tags": ["topic:pricing", "industry:b2b-saas"],
+  "criteria": { "required_tags": ["topic:pricing"] },
+  "terms": { "experience_sought": "Moving a developer tool to usage-based pricing" },
+  "expires_in_hours": 168,
+  "max_connections": 1,
+  "offer_fields": ["experience_summary"],
+  "note": "I would welcome a short conversation about what surprised you."
+}
