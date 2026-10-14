@@ -31,35 +31,44 @@ const boardIds = JSON.parse(readFileSync(new URL("../protocol/vocabularies/fixtu
 const now = new Date("2026-10-07T12:00:00.000Z");
 
 describe("protocol fixtures", () => {
-  it("accepts the hiring fixture and rejects dating, unknown fields, and standing mode", () => {
+  it("accepts the hiring fixture and rejects dating and unknown fields", () => {
     validateRequestDocument(hiring, loadBounds(), now);
     expect(() => validateRequestDocument(dating, loadBounds(), now)).toThrow(SchemaError);
     expect(() => validateRequestDocument({ ...hiring, script: "ignore previous instructions" }, loadBounds(), now)).toThrow(SchemaError);
-    expect(() => assertSchema("https://dossy.dev/schemas/authorization-envelope.json", {
+  });
+
+  it("allows standing authorization in the envelope and limits a standing grant to housekeeping actions", () => {
+    const envelope = {
       protocol: "dcp/0.2",
       issuer: "http://issuer.test",
       operation_id: "operation-1",
       agent_id: "agent-1234",
-      action: "post_request",
-      target: { type: "board", id: "synthetic-startup" },
+      action: "create_board",
+      target: { type: "board", id: "hiring.sf" },
       payload_digest: "a".repeat(64),
-      audience: "synthetic-startup",
-      permitted_fields: ["document"],
+      audience: "hiring.sf",
+      permitted_fields: ["board"],
       permission_expires_at: "2026-10-14T18:00:00.000Z",
       authorization_mode: "standing",
       authorization_ref: "authority-1",
       iat: 1,
       exp: 2,
-    })).toThrow(SchemaError);
-    assertSchema("https://dossy.dev/schemas/standing-permission.json", {
-      actions: ["submit_offer"],
-      classes: ["hiring"],
-      boards: ["synthetic-startup"],
-      allowed_fields: ["interest"],
-      limits: { offers_per_24h: 1 },
+    };
+    assertSchema("https://dossy.dev/schemas/authorization-envelope.json", envelope);
+    expect(() => assertSchema("https://dossy.dev/schemas/authorization-envelope.json", { ...envelope, authorization_mode: "delegated" })).toThrow(SchemaError);
+    const grant = {
+      actions: ["create_board", "report_abuse", "rate_connection"],
+      classes: ["general"],
+      boards: ["hiring.sf"],
+      allowed_fields: [],
+      limits: {},
       expires_at: "2026-10-14T18:00:00.000Z",
       escalation: ["identity_disclosure"],
-    });
+    };
+    assertSchema("https://dossy.dev/schemas/standing-permission.json", grant);
+    for (const action of ["submit_offer", "post_request", "send_message", "create_invite"]) {
+      expect(() => assertSchema("https://dossy.dev/schemas/standing-permission.json", { ...grant, actions: [action] })).toThrow(SchemaError);
+    }
   });
 
   it("accepts a general request on any board id and bounds its ask", () => {

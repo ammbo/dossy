@@ -1,0 +1,10 @@
+{
+  "$id": "https://dossy.dev/schemas/merge-position.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["position"],
+  "properties": {
+    "position": { "enum": ["support", "object"] }
+  }
+}

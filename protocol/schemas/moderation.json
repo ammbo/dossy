@@ -1,0 +1,13 @@
+{
+  "$id": "https://dossy.dev/schemas/moderation.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A moderator or organizer action. The envelope action says which; fields not used by that action are rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "reason": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "restricted": { "type": "boolean" },
+    "description": { "type": "string", "minLength": 1, "maxLength": 280 },
+    "upheld": { "type": "boolean" }
+  }
+}

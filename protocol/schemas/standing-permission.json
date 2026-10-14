@@ -1,18 +1,41 @@
 {
   "$id": "https://dossy.dev/schemas/standing-permission.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Local standing permission schema. Execution is disabled in protocol 0.1.",
+  "title": "Local standing grant. The network accepts standing authorization only for these actions; everything else needs human authorization.",
   "type": "object",
   "additionalProperties": false,
   "required": ["actions", "classes", "boards", "allowed_fields", "limits", "expires_at", "escalation"],
   "properties": {
     "actions": {
       "type": "array",
-      "items": { "enum": ["submit_offer"] }
+      "items": {
+        "enum": [
+          "create_board",
+          "propose_merge",
+          "support_merge",
+          "object_merge",
+          "report_abuse",
+          "rate_connection",
+          "withdraw",
+          "revoke_authorization",
+          "hide_request",
+          "restore_request",
+          "remove_request",
+          "restrict_posting",
+          "execute_merge",
+          "veto_merge",
+          "revert_merge",
+          "resolve_report",
+          "edit_board",
+          "pause_board",
+          "resume_board",
+          "remove_board"
+        ]
+      }
     },
     "classes": {
       "type": "array",
-      "items": { "enum": ["introduction", "advice", "hiring", "event"] }
+      "items": { "enum": ["general", "introduction", "advice", "hiring", "event"] }
     },
     "boards": { "type": "array", "items": { "type": "string" } },
     "allowed_fields": { "type": "array", "items": { "type": "string" } },

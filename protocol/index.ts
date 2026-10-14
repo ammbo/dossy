@@ -10,9 +10,12 @@ import display from "./schemas/display.json" with { type: "json" };
 import error from "./schemas/error.json" with { type: "json" };
 import jwkEnc from "./schemas/jwk-enc.json" with { type: "json" };
 import jwkSig from "./schemas/jwk-sig.json" with { type: "json" };
+import mergePosition from "./schemas/merge-position.json" with { type: "json" };
+import mergeProposal from "./schemas/merge-proposal.json" with { type: "json" };
 import messageClarification from "./schemas/message-clarification.json" with { type: "json" };
 import messageHandoff from "./schemas/message-handoff.json" with { type: "json" };
 import messageSubmission from "./schemas/message-submission.json" with { type: "json" };
+import moderation from "./schemas/moderation.json" with { type: "json" };
 import offerPlaintext from "./schemas/offer-plaintext.json" with { type: "json" };
 import offerSchema from "./schemas/offer-schema.json" with { type: "json" };
 import offerSubmission from "./schemas/offer-submission.json" with { type: "json" };
@@ -40,9 +43,12 @@ export const schemas: Record<string, { $id: string }> = {
   "error.json": error,
   "jwk-enc.json": jwkEnc,
   "jwk-sig.json": jwkSig,
+  "merge-position.json": mergePosition,
+  "merge-proposal.json": mergeProposal,
   "message-clarification.json": messageClarification,
   "message-handoff.json": messageHandoff,
   "message-submission.json": messageSubmission,
+  "moderation.json": moderation,
   "offer-plaintext.json": offerPlaintext,
   "offer-schema.json": offerSchema,
   "offer-submission.json": offerSubmission,

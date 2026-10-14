@@ -34,7 +34,22 @@
         "withdraw",
         "revoke_authorization",
         "report_abuse",
-        "create_board"
+        "create_board",
+        "propose_merge",
+        "support_merge",
+        "object_merge",
+        "hide_request",
+        "restore_request",
+        "remove_request",
+        "restrict_posting",
+        "execute_merge",
+        "veto_merge",
+        "revert_merge",
+        "resolve_report",
+        "edit_board",
+        "pause_board",
+        "resume_board",
+        "remove_board"
       ]
     },
     "target": {
@@ -42,7 +57,7 @@
       "additionalProperties": false,
       "required": ["type", "id"],
       "properties": {
-        "type": { "enum": ["board", "request", "offer", "connection", "authorization"] },
+        "type": { "enum": ["board", "request", "offer", "connection", "authorization", "merge_proposal", "report"] },
         "id": { "type": "string", "minLength": 1, "maxLength": 128 }
       }
     },
@@ -58,7 +73,7 @@
       "items": { "type": "string", "minLength": 1, "maxLength": 64 }
     },
     "permission_expires_at": { "type": "string", "format": "date-time" },
-    "authorization_mode": { "const": "human" },
+    "authorization_mode": { "enum": ["human", "standing"] },
     "authorization_ref": { "type": "string", "minLength": 8, "maxLength": 128 },
     "iat": { "type": "integer", "minimum": 0 },
     "exp": { "type": "integer", "minimum": 0 }

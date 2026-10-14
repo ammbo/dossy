@@ -5,13 +5,14 @@
   "additionalProperties": false,
   "required": ["category", "description", "transaction_ids"],
   "properties": {
-    "category": { "enum": ["flooding", "false_claim", "consent", "third_party", "credential", "other"] },
+    "category": { "enum": ["flooding", "false_claim", "consent", "third_party", "credential", "spam", "content_policy", "other"] },
     "description": { "type": "string", "minLength": 1, "maxLength": 512 },
     "transaction_ids": {
       "type": "array",
       "maxItems": 10,
       "items": { "type": "string", "minLength": 1, "maxLength": 128 }
     },
-    "board_id": { "type": "string", "pattern": "^[a-z0-9-]+$" }
+    "board_id": { "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*){0,3}$" },
+    "request_id": { "type": "string", "minLength": 1, "maxLength": 128 }
   }
 }

@@ -346,8 +346,8 @@ export class DossyClient {
     return this.call("GET", `/v0.2/connections/${connectionId}/messages`, undefined, "agent");
   }
 
-  async withdraw(resource: "requests" | "offers" | "connections", id: string, stateVersion: number | undefined, authorizationRef: string, options?: MutationOptions): Promise<Record<string, unknown>> {
-    const type = resource === "requests" ? "request" : resource === "offers" ? "offer" : "connection";
+  async withdraw(resource: "requests" | "offers" | "connections" | "merge-proposals", id: string, stateVersion: number | undefined, authorizationRef: string, options?: MutationOptions): Promise<Record<string, unknown>> {
+    const type = { requests: "request", offers: "offer", connections: "connection", "merge-proposals": "merge_proposal" }[resource];
     return this.mutate(`/v0.2/${resource}/${id}/withdraw`, {
       options,
       action: "withdraw",
@@ -383,10 +383,72 @@ export class DossyClient {
     return this.mutate("/v0.2/reports", {
       options,
       action: "report_abuse",
-      target: { type: "board", id: "reports" },
+      target: { type: "report", id: "new" },
       payload: report,
-      audience: "reports",
+      audience: "new",
       permittedFields: ["report"],
+      authorizationRef,
+      permissionExpiresAt: new Date(this.clock.now().getTime() + 15 * 60 * 1000).toISOString(),
+    });
+  }
+
+  /** Proposes merging `sourceBoardId` into another board. The proposer's support is counted. */
+  async proposeMerge(
+    sourceBoardId: string,
+    input: { target_board_id: string; reason: string },
+    authorizationRef = newOperationId(),
+    options?: MutationOptions,
+  ): Promise<Record<string, unknown>> {
+    return this.mutate(`/v0.2/boards/${encodeURIComponent(sourceBoardId)}/merge-proposals`, {
+      options,
+      action: "propose_merge",
+      target: { type: "board", id: sourceBoardId },
+      payload: input,
+      audience: sourceBoardId,
+      permittedFields: ["merge"],
+      authorizationRef,
+      permissionExpiresAt: new Date(this.clock.now().getTime() + 15 * 60 * 1000).toISOString(),
+    });
+  }
+
+  async listMergeProposals(boardId: string): Promise<Record<string, unknown>> {
+    return this.call("GET", `/v0.2/boards/${encodeURIComponent(boardId)}/merge-proposals`, undefined, "agent");
+  }
+
+  /** Supports or objects to a merge proposal. One live position per member; a later one replaces it. */
+  async takeMergePosition(proposalId: string, position: "support" | "object", authorizationRef = newOperationId(), options?: MutationOptions): Promise<Record<string, unknown>> {
+    return this.mutate(`/v0.2/merge-proposals/${encodeURIComponent(proposalId)}/positions`, {
+      options,
+      action: position === "support" ? "support_merge" : "object_merge",
+      target: { type: "merge_proposal", id: proposalId },
+      payload: { position },
+      audience: proposalId,
+      permittedFields: ["position"],
+      authorizationRef,
+      permissionExpiresAt: new Date(this.clock.now().getTime() + 15 * 60 * 1000).toISOString(),
+    });
+  }
+
+  /** Reports, hidden requests, and merge proposals in this moderator's scope. */
+  async moderationQueue(): Promise<Record<string, unknown>> {
+    return this.call("GET", "/v0.2/moderation/queue", undefined, "agent");
+  }
+
+  /** A moderator or organizer action, such as hide_request or execute_merge, on one target. */
+  async moderate(
+    action: string,
+    target: { type: "request" | "board" | "merge_proposal" | "report"; id: string },
+    payload: { reason?: string; restricted?: boolean; description?: string; upheld?: boolean } = {},
+    authorizationRef = newOperationId(),
+    options?: MutationOptions,
+  ): Promise<Record<string, unknown>> {
+    return this.mutate(`/v0.2/moderation/${action}`, {
+      options,
+      action,
+      target,
+      payload,
+      audience: target.id,
+      permittedFields: ["moderation"],
       authorizationRef,
       permissionExpiresAt: new Date(this.clock.now().getTime() + 15 * 60 * 1000).toISOString(),
     });
