@@ -13,6 +13,8 @@ import {
   keyFingerprint,
   importSigningKey,
   loadBounds,
+  PROTOCOL,
+  VOCABULARY,
   loadVocabulary,
   localDecline,
   nextPollDelay,
@@ -90,6 +92,10 @@ describe("protocol fixtures", () => {
     expect(() => validateRequestDocument(hiring, limits, now)).toThrow(/8 KiB|invalid/);
     expect(() => validateRequestDocument({ ...hiring, note: "too long for the tightened test limit" }, { ...loadBounds(), note_max_chars: 4 }, now)).toThrow(SchemaError);
     expect(canonicalByteLength(hiring)).toBeLessThan(8192);
+  });
+
+  it("publishes bounds for the protocol and vocabulary the SDK speaks", () => {
+    expect(loadBounds()).toMatchObject({ protocol: PROTOCOL, vocabulary: VOCABULARY });
   });
 
   it("formats key fingerprints as uppercase hex, whatever characters the thumbprint holds", () => {
