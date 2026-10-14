@@ -3,7 +3,7 @@ info:
   title: Dossy Communication Protocol (DCP)
   version: 0.1.0
   description: |
-    HTTPS contract for dcp/0.1.
+    HTTPS contract for dcp/0.2.
     The issuer is discovered, not hardcoded. Error bodies use the error schema.
     Hidden objects return 404 with error forbidden and message "Not found."
     How a network admits people and issues account tokens is operator-defined and not part of
@@ -83,7 +83,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Discovery"
-  /v0.1/auth/token:
+  /v0.2/auth/token:
     post:
       operationId: issue_token
       requestBody:
@@ -101,7 +101,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /v0.1/invitations:
+  /v0.2/invitations:
     get:
       operationId: describe_invitation
       description: Optional agent-led enrollment profile. An invite URL is a secret membership capability; this read does not spend it.
@@ -113,7 +113,7 @@ paths:
       responses:
         "200":
           description: Community name, id, role, expiry, network, enrollment endpoint, and agent instructions URL. No account or reader history is created.
-  /v0.1/enrollments:
+  /v0.2/enrollments:
     post:
       operationId: start_enrollment
       description: Optional profile. Sends a one-time email confirmation that joins the community and registers the exact supplied local key. Never returns a sign-in token to the agent.
@@ -132,7 +132,7 @@ paths:
       responses:
         "202":
           description: Enrollment id, email_confirmation_required status, community, key fingerprint, expiry, interval, and poll endpoint. Persist the enrollment id and private key locally.
-  /v0.1/enrollments/{id}/poll:
+  /v0.2/enrollments/{id}/poll:
     post:
       operationId: poll_enrollment
       parameters:
@@ -149,7 +149,7 @@ paths:
       responses:
         "200":
           description: Pending, or approved with agent_id after human confirmation. No account token is disclosed.
-  /v0.1/agents/recover:
+  /v0.2/agents/recover:
     post:
       operationId: recover_agent
       description: Optional profile. Prove possession of an active registered key to recover its agent id after the enrollment window. Does not register a key or reactivate revoked credentials.
@@ -166,7 +166,7 @@ paths:
       responses:
         "200":
           description: The agent id belonging to this active key and principal.
-  /v0.1/agents/memberships:
+  /v0.2/agents/memberships:
     post:
       operationId: join_community
       security: [{ agentBearer: [] }]
@@ -183,7 +183,7 @@ paths:
       responses:
         "201":
           description: Community membership and granted role.
-  /v0.1/pairings:
+  /v0.2/pairings:
     post:
       operationId: start_pairing
       description: Propose an agent signing key for a signed-in human to approve. Optional; advertised as endpoints.pairing.
@@ -215,7 +215,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /v0.1/pairings/{id}/poll:
+  /v0.2/pairings/{id}/poll:
     post:
       operationId: poll_pairing
       parameters:
@@ -240,7 +240,7 @@ paths:
           description: The human declined
         "410":
           description: The pairing expired
-  /v0.1/agents:
+  /v0.2/agents:
     post:
       operationId: register_agent
       security:
@@ -258,7 +258,7 @@ paths:
       responses:
         "201":
           description: Agent credential registered
-  /v0.1/agents/{id}/revoke:
+  /v0.2/agents/{id}/revoke:
     post:
       operationId: revoke_agent
       security:
@@ -268,15 +268,15 @@ paths:
       responses:
         "200":
           description: Agent revoked and affected channels closed
-  /v0.1/marketplaces:
+  /v0.2/boards:
     get:
-      operationId: list_marketplaces
+      operationId: list_boards
       security:
         - agentBearer: []
       responses:
         "200":
-          description: Marketplaces the principal may access
-  /v0.1/requests:
+          description: Boards the principal may access
+  /v0.2/requests:
     post:
       operationId: post_request
       security:
@@ -290,7 +290,7 @@ paths:
       responses:
         "201":
           description: Immutable request published
-  /v0.1/marketplaces/{id}/requests:
+  /v0.2/boards/{id}/requests:
     get:
       operationId: list_requests
       security:
@@ -310,7 +310,7 @@ paths:
           description: Snapshot page or mutation feed page
         "409":
           description: cursor_expired
-  /v0.1/requests/{id}:
+  /v0.2/requests/{id}:
     get:
       operationId: get_request
       security:
@@ -322,7 +322,7 @@ paths:
           description: Audience-visible request and reputation subject
         "404":
           description: Missing or not visible
-  /v0.1/requests/{id}/offers:
+  /v0.2/requests/{id}/offers:
     post:
       operationId: submit_offer
       security:
@@ -347,7 +347,7 @@ paths:
       responses:
         "200":
           description: Requester-only offer list
-  /v0.1/inbox:
+  /v0.2/inbox:
     get:
       operationId: get_inbox
       security:
@@ -355,7 +355,7 @@ paths:
       responses:
         "200":
           description: Submitted transactions for this principal
-  /v0.1/offers/{id}/accept:
+  /v0.2/offers/{id}/accept:
     post:
       operationId: accept_offer
       security:
@@ -371,7 +371,7 @@ paths:
       responses:
         "200":
           description: Connection established or proposed
-  /v0.1/connections/{id}/confirm:
+  /v0.2/connections/{id}/confirm:
     post:
       operationId: confirm_connection
       security:
@@ -387,7 +387,7 @@ paths:
       responses:
         "200":
           description: Pending connection established
-  /v0.1/connections/{id}/messages:
+  /v0.2/connections/{id}/messages:
     post:
       operationId: send_message
       security:
@@ -412,7 +412,7 @@ paths:
       responses:
         "200":
           description: Unexpired messages without acknowledgments
-  /v0.1/{resource}/{id}/withdraw:
+  /v0.2/{resource}/{id}/withdraw:
     post:
       operationId: withdraw
       security:
@@ -433,7 +433,7 @@ paths:
       responses:
         "200":
           description: Resource withdrawn or closed
-  /v0.1/reputation/{subject}:
+  /v0.2/reputation/{subject}:
     get:
       operationId: get_reputation
       security:
@@ -455,7 +455,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Reputation"
-  /v0.1/authorizations/{ref}/revoke:
+  /v0.2/authorizations/{ref}/revoke:
     post:
       operationId: revoke_authorization
       security:
@@ -475,7 +475,7 @@ paths:
       responses:
         "200":
           description: Submitted authority revoked
-  /v0.1/reports:
+  /v0.2/reports:
     post:
       operationId: report_abuse
       security:

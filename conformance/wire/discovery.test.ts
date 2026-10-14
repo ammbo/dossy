@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { MemoryStore, syncMarketplace } from "@dossy/sdk";
+import { MemoryStore, syncBoard } from "@dossy/sdk";
 import { loadTarget } from "../target.js";
 import { hiringDocument } from "./helpers.js";
 
@@ -20,13 +20,13 @@ suite("discovery without reader tracking", () => {
     const original = reader.client.fetchImpl;
     reader.client.fetchImpl = async (input, init) => {
       const response = await original(input, init);
-      if (!during && String(input).includes(`/marketplaces/${target!.marketplaceId}/requests`)) {
+      if (!during && String(input).includes(`/boards/${target!.boardId}/requests`)) {
         during = String((await requester.client.postRequest(hiringDocument(target!, requester.encryption.publicJwk, { note: "during snapshot" }))).request_id);
       }
       return response;
     };
     try {
-      await syncMarketplace(reader.client, target!.marketplaceId, store, async (request) => {
+      await syncBoard(reader.client, target!.boardId, store, async (request) => {
         seen.push(String(request.request_id));
       });
     } finally {
@@ -37,28 +37,28 @@ suite("discovery without reader tracking", () => {
     expect(seen).toContain(during);
     expect(new Set(seen).size).toBe(seen.length);
     await requester.client.withdraw("requests", String(first.request_id), undefined, `withdraw-${first.request_id}`);
-    await syncMarketplace(reader.client, target!.marketplaceId, store, async () => {
+    await syncBoard(reader.client, target!.boardId, store, async () => {
       throw new Error("a lifecycle change must not prompt again");
     });
   });
 
   it("returns cursor_expired for a cursor it did not issue", async () => {
     const reader = await target!.enroll("cursor-reader");
-    await expect(reader.client.listRequests(target!.marketplaceId, "not.a-cursor")).rejects.toMatchObject({ code: "cursor_expired" });
+    await expect(reader.client.listRequests(target!.boardId, "not.a-cursor")).rejects.toMatchObject({ code: "cursor_expired" });
   });
 
   it("offers a request again when the human prompt failed", async () => {
     const requester = await target!.enroll("prompt-requester");
     const reader = await target!.enroll("prompt-reader");
     const store = new MemoryStore();
-    await syncMarketplace(reader.client, target!.marketplaceId, store, async () => {});
+    await syncBoard(reader.client, target!.boardId, store, async () => {});
     const created = await requester.client.postRequest(hiringDocument(target!, requester.encryption.publicJwk, { note: "prompt failure" }));
-    const first = await syncMarketplace(reader.client, target!.marketplaceId, store, async (request) => {
+    const first = await syncBoard(reader.client, target!.boardId, store, async (request) => {
       if (request.request_id === created.request_id) throw new Error("model call failed");
     });
     expect(first.failed).toBe(1);
     const prompted: string[] = [];
-    await syncMarketplace(reader.client, target!.marketplaceId, store, async (request) => {
+    await syncBoard(reader.client, target!.boardId, store, async (request) => {
       prompted.push(String(request.request_id));
     });
     expect(prompted).toEqual([String(created.request_id)]);

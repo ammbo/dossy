@@ -10,11 +10,11 @@ export function at(target: ConformanceTarget, offsetMs: number): string {
 
 export function hiringDocument(target: ConformanceTarget, replyKey: PublicJwk, patch: Record<string, unknown> = {}) {
   return {
-    protocol: "dcp/0.1",
+    protocol: "dcp/0.2",
     revision: 1,
     class: "hiring",
     vocabulary: "core/0.1",
-    marketplace_id: target.marketplaceId,
+    board_id: target.boardId,
     tags: ["role:growth-lead", "industry:b2b-saas", "seniority:senior"],
     criteria: { required_tags: ["role:growth-lead"], locations: [], work_mode: ["remote"] },
     terms: { purpose: "conversation" },
@@ -30,11 +30,11 @@ export function hiringDocument(target: ConformanceTarget, replyKey: PublicJwk, p
 export function eventDocument(target: ConformanceTarget, replyKey: PublicJwk, maxConnections = 2) {
   const deadline = at(target, 6 * DAY);
   return {
-    protocol: "dcp/0.1",
+    protocol: "dcp/0.2",
     revision: 1,
     class: "event",
     vocabulary: "core/0.1",
-    marketplace_id: target.marketplaceId,
+    board_id: target.boardId,
     tags: ["topic:hiring"],
     criteria: { locations: ["loc:nyc"] },
     terms: {

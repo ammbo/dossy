@@ -4,7 +4,7 @@
   "title": "Local standing permission schema. Execution is disabled in protocol 0.1.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["actions", "classes", "marketplaces", "allowed_fields", "limits", "expires_at", "escalation"],
+  "required": ["actions", "classes", "boards", "allowed_fields", "limits", "expires_at", "escalation"],
   "properties": {
     "actions": {
       "type": "array",
@@ -14,7 +14,7 @@
       "type": "array",
       "items": { "enum": ["introduction", "advice", "hiring", "event"] }
     },
-    "marketplaces": { "type": "array", "items": { "type": "string" } },
+    "boards": { "type": "array", "items": { "type": "string" } },
     "allowed_fields": { "type": "array", "items": { "type": "string" } },
     "limits": {
       "type": "object",

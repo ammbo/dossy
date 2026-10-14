@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { exportJWK, generateKeyPair, importJWK, type JWK } from "jose";
 import lockfile from "proper-lockfile";
-import { randomId, type Gap, type MarketCursor, type PublicJwk, type SeenRecord, type SyncStore } from "@dossy/sdk";
+import { randomId, type Gap, type BoardCursor, type PublicJwk, type SeenRecord, type SyncStore } from "@dossy/sdk";
 
 /** A key the bridge holds for one object, kept until the object can no longer need it. */
 export type HeldKey = { jwk: JWK; keep_until: string };
@@ -49,7 +49,7 @@ export type BridgeState = {
     /** offer_id → the requester's per-connection message key, created at acceptance. */
     accept: Record<string, HeldKey>;
   };
-  cursors: Record<string, MarketCursor>;
+  cursors: Record<string, BoardCursor>;
   seen: Record<string, SeenRecord>;
   gaps: Gap[];
   outbox: PendingSend[];

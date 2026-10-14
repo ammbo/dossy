@@ -1,5 +1,5 @@
 {
-  "marketplace_id": "startup-operators",
+  "board_id": "startup-operators",
   "class": "advice",
   "tags": ["topic:pricing", "industry:b2b-saas"],
   "criteria": { "required_tags": ["topic:pricing"] },

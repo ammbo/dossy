@@ -24,11 +24,11 @@ export interface ConformanceTarget {
   readonly name: string;
   /** The issuer from discovery. Clients sign with it. */
   readonly issuer: string;
-  /** A marketplace every enrolled party is admitted to, with the four launch classes enabled. */
-  readonly marketplaceId: string;
+  /** A board every enrolled party is admitted to, with the four launch classes enabled. */
+  readonly boardId: string;
   /** The clock clients sign with. It must track the network's clock. */
   readonly clock: Clock;
-  /** Admits a new principal to `marketplaceId` and registers one agent for it. */
+  /** Admits a new principal to `boardId` and registers one agent for it. */
   enroll(label: string): Promise<Party>;
   /** Moves the network's clock forward. Test networks only. */
   advanceTime?(ms: number): Promise<void>;

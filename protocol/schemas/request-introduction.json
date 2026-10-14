@@ -3,13 +3,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["protocol", "revision", "class", "vocabulary", "marketplace_id", "tags", "criteria", "terms", "expires_at", "max_connections", "offer_schema", "reply_key"],
+  "required": ["protocol", "revision", "class", "vocabulary", "board_id", "tags", "criteria", "terms", "expires_at", "max_connections", "offer_schema", "reply_key"],
   "properties": {
-    "protocol": { "const": "dcp/0.1" },
+    "protocol": { "const": "dcp/0.2" },
     "revision": { "const": 1 },
     "class": { "const": "introduction" },
     "vocabulary": { "const": "core/0.1" },
-    "marketplace_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9-]+$" },
+    "board_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9-]+$" },
     "tags": { "$ref": "https://dossy.dev/schemas/tag-list.json" },
     "criteria": {
       "type": "object",

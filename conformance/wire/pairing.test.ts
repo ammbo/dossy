@@ -25,7 +25,7 @@ suite("agent pairing", () => {
     const { DossyClient } = await import("@dossy/sdk");
     const agent = new DossyClient({ networkUrl: human.client.networkUrl, issuer: target!.issuer, fetchImpl: human.client.fetchImpl, clock: target!.clock });
     await agent.issueToken(String(approved.agent_id), keys.privateKey);
-    const markets = (await agent.listMarketplaces()).marketplaces as { marketplace_id: string }[];
-    expect(markets.map((market) => market.marketplace_id)).toContain(target!.marketplaceId);
+    const boards = (await agent.listBoards()).boards as { board_id: string }[];
+    expect(boards.map((board) => board.board_id)).toContain(target!.boardId);
   });
 });

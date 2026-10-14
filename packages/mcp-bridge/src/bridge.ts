@@ -7,7 +7,7 @@ import {
   loadBounds,
   loadVocabulary,
   randomId,
-  syncMarketplace,
+  syncBoard,
   triage,
   validateRequestDocument,
   type Clock,
@@ -77,13 +77,13 @@ export class Bridge {
 
   async networkStatus(): Promise<Row> {
     const discovery = await this.client.discover();
-    const markets = await this.client.listMarketplaces();
+    const boards = await this.client.listBoards();
     return {
       network: this.store.state.network_url,
       issuer: discovery.issuer,
       agent_id: this.store.state.agent_id,
       classes: discovery.classes,
-      marketplaces: markets.marketplaces,
+      boards: boards.boards,
       unreported_gaps: this.store.state.gaps,
       queued_actions: this.store.state.outbox.map((item) => ({ action: item.method, queued_at: item.queued_at })),
     };
@@ -96,8 +96,8 @@ export class Bridge {
     const digest = digestJson(invite.invite);
     const known = this.store.state.joined_invites?.[digest];
     if (known) {
-      const memberships = (await this.client.listMarketplaces()).marketplaces as Row[];
-      if (memberships.some((m) => m.marketplace_id === known.id)) return { status: "connected", community: known };
+      const memberships = (await this.client.listBoards()).boards as Row[];
+      if (memberships.some((m) => m.board_id === known.id)) return { status: "connected", community: known };
     }
     const details = await this.client.invitation(invite.invite);
     await this.client.joinCommunity(invite.invite);
@@ -127,8 +127,8 @@ export class Bridge {
   }
 
   /** Recovers every open request since the last check and returns the new ones, triaged locally. */
-  async checkRequests(marketplaceId?: string): Promise<Row> {
-    const found = await this.discoverNew(marketplaceId);
+  async checkRequests(boardId?: string): Promise<Row> {
+    const found = await this.discoverNew(boardId);
     const queued = this.store.state.digest ?? [];
     this.store.state.digest = [];
     await this.store.save(this.now());
@@ -147,15 +147,15 @@ export class Bridge {
     return found.requests.length;
   }
 
-  private async discoverNew(marketplaceId?: string): Promise<{ requests: Row[]; gaps: unknown[] }> {
-    const markets = marketplaceId
-      ? [marketplaceId]
-      : ((await this.client.listMarketplaces()).marketplaces as { marketplace_id: string }[]).map((market) => market.marketplace_id);
+  private async discoverNew(boardId?: string): Promise<{ requests: Row[]; gaps: unknown[] }> {
+    const boards = boardId
+      ? [boardId]
+      : ((await this.client.listBoards()).boards as { board_id: string }[]).map((board) => board.board_id);
     const vocabulary = loadVocabulary();
     const found: Row[] = [];
     const gapsBefore = this.store.state.gaps.length;
-    for (const market of markets) {
-      await syncMarketplace(this.client, market, this.store, async (request) => {
+    for (const board of boards) {
+      await syncBoard(this.client, board, this.store, async (request) => {
         found.push(this.compactRequest(request, triage({ ...(request.document as Row), protocol: String(request.protocol) } as never, vocabulary)));
       });
     }
@@ -230,7 +230,7 @@ export class Bridge {
   // Outward actions. Each one is built here, shown to the human exactly, and signed only on approval.
 
   async publishRequest(input: {
-    marketplace_id: string;
+    board_id: string;
     class: string;
     tags: string[];
     criteria: Row;
@@ -250,11 +250,11 @@ export class Bridge {
       ? input.terms.response_deadline
       : this.at(hours * HOUR);
     const draft = {
-      protocol: "dcp/0.1",
+      protocol: "dcp/0.2",
       revision: 1,
       class: input.class,
       vocabulary: "core/0.1",
-      marketplace_id: input.marketplace_id,
+      board_id: input.board_id,
       tags: input.tags,
       criteria: input.criteria,
       terms: input.terms,
@@ -277,8 +277,8 @@ export class Bridge {
     }
     const approval: ApprovalRequest = {
       action: "post_request",
-      title: `Publish ${/^[aeiou]/.test(input.class) ? "an" : "a"} ${input.class} request to ${input.marketplace_id}`,
-      recipient: `Every admitted member of marketplace ${input.marketplace_id}`,
+      title: `Publish ${/^[aeiou]/.test(input.class) ? "an" : "a"} ${input.class} request to ${input.board_id}`,
+      recipient: `Every admitted member of board ${input.board_id}`,
       disclosure: draft,
       permits: [
         `Members' agents may read this request until ${expiresAt}`,
@@ -290,7 +290,7 @@ export class Bridge {
         "A published request cannot be edited. Withdrawing it later still counts against your posting budget.",
       ],
     };
-    const result = await this.guard(() => this.send(approval, { type: "marketplace", id: input.marketplace_id }, authorizationRef, "postRequest", [document, authorizationRef], expiresAt, randomId(),
+    const result = await this.guard(() => this.send(approval, { type: "board", id: input.board_id }, authorizationRef, "postRequest", [document, authorizationRef], expiresAt, randomId(),
       { rename_reply_from: replyId, retarget_ref: authorizationRef }), () => delete this.store.state.keys.reply[replyId]);
     await this.store.save(this.now());
     return result;
@@ -455,9 +455,9 @@ export class Bridge {
     return result;
   }
 
-  async reportAbuse(input: { category: string; description: string; transaction_ids: string[]; marketplace_id?: string }): Promise<Row> {
+  async reportAbuse(input: { category: string; description: string; transaction_ids: string[]; board_id?: string }): Promise<Row> {
     const authorizationRef = randomId();
-    const report = { category: input.category, description: input.description, transaction_ids: input.transaction_ids, ...(input.marketplace_id ? { marketplace_id: input.marketplace_id } : {}) };
+    const report = { category: input.category, description: input.description, transaction_ids: input.transaction_ids, ...(input.board_id ? { board_id: input.board_id } : {}) };
     const approval: ApprovalRequest = {
       action: "report_abuse",
       title: "Send an abuse report",
@@ -667,7 +667,7 @@ export class Bridge {
       request_id: request.request_id,
       origin: request.origin,
       state: request.state,
-      marketplace_id: document.marketplace_id,
+      board_id: document.board_id,
       class: document.class,
       tags: document.tags,
       criteria: document.criteria,

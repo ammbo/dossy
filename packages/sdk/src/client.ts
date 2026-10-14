@@ -105,28 +105,28 @@ export class DossyClient {
   }
 
   async invitation(inviteCode: string): Promise<Record<string, unknown>> {
-    return this.call("GET", `/v0.1/invitations?invite=${encodeURIComponent(inviteCode)}`, undefined, "none");
+    return this.call("GET", `/v0.2/invitations?invite=${encodeURIComponent(inviteCode)}`, undefined, "none");
   }
 
   async enroll(inviteCode: string, email: string, publicJwk: PublicJwk, label?: string): Promise<Record<string, unknown>> {
-    return this.call("POST", "/v0.1/enrollments", { invite_code: inviteCode, contact_email: email, public_jwk: publicJwk, label }, "none");
+    return this.call("POST", "/v0.2/enrollments", { invite_code: inviteCode, contact_email: email, public_jwk: publicJwk, label }, "none");
   }
 
   async pollEnrollment(id: string, signingKey: CryptoKey): Promise<Record<string, unknown>> {
     const now = Math.floor(this.clock.now().getTime() / 1000);
     const proof = await signClaims(signingKey, id, { pairing_id: id, aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
-    return this.call("POST", `/v0.1/enrollments/${encodeURIComponent(id)}/poll`, { proof }, "none");
+    return this.call("POST", `/v0.2/enrollments/${encodeURIComponent(id)}/poll`, { proof }, "none");
   }
 
   async joinCommunity(inviteCode: string): Promise<Record<string, unknown>> {
-    return this.call("POST", "/v0.1/agents/memberships", { invite_code: inviteCode }, "agent");
+    return this.call("POST", "/v0.2/agents/memberships", { invite_code: inviteCode }, "agent");
   }
 
   async recoverAgent(publicJwk: PublicJwk, signingKey: CryptoKey): Promise<Record<string, unknown>> {
     const { calculateJwkThumbprint } = await import("jose");
     const now = Math.floor(this.clock.now().getTime() / 1000);
     const proof = await signClaims(signingKey, "recovery", { sub: await calculateJwkThumbprint(publicJwk), purpose: "recover_agent", aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
-    return this.call("POST", "/v0.1/agents/recover", { public_jwk: publicJwk, proof }, "none");
+    return this.call("POST", "/v0.2/agents/recover", { public_jwk: publicJwk, proof }, "none");
   }
 
   /**
@@ -134,14 +134,14 @@ export class DossyClient {
    * the human approves while signed in to the network. No account token is needed on the agent.
    */
   async startPairing(publicJwk: PublicJwk, label?: string): Promise<Record<string, unknown>> {
-    return this.call("POST", "/v0.1/pairings", { public_jwk: publicJwk, ...(label ? { label } : {}) }, "none");
+    return this.call("POST", "/v0.2/pairings", { public_jwk: publicJwk, ...(label ? { label } : {}) }, "none");
   }
 
   /** Asks whether the human approved, proving possession of the key being paired. */
   async pollPairing(pairingId: string, signingKey: CryptoKey): Promise<Record<string, unknown>> {
     const now = Math.floor(this.clock.now().getTime() / 1000);
     const proof = await signClaims(signingKey, pairingId, { pairing_id: pairingId, aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
-    return this.call("POST", `/v0.1/pairings/${pairingId}/poll`, { proof }, "none");
+    return this.call("POST", `/v0.2/pairings/${pairingId}/poll`, { proof }, "none");
   }
 
   /** Polls until the human approves or declines, or the pairing expires. Returns the new agent id. */
@@ -161,11 +161,11 @@ export class DossyClient {
 
   /** Registers an agent signing key. Authorized by an account token the operator issued. */
   async registerAgent(publicJwk: PublicJwk): Promise<Record<string, unknown>> {
-    return this.call("POST", "/v0.1/agents", { public_jwk: publicJwk }, "account");
+    return this.call("POST", "/v0.2/agents", { public_jwk: publicJwk }, "account");
   }
 
   async revokeAgent(agentId: string): Promise<Record<string, unknown>> {
-    return this.call("POST", `/v0.1/agents/${agentId}/revoke`, {}, "account");
+    return this.call("POST", `/v0.2/agents/${agentId}/revoke`, {}, "account");
   }
 
   async issueToken(agentId: string, signingKey: CryptoKey): Promise<string> {
@@ -178,7 +178,7 @@ export class DossyClient {
       exp: now + loadBounds().assertion_max_seconds,
       jti: randomId(),
     });
-    const body = await this.call("POST", "/v0.1/auth/token", {
+    const body = await this.call("POST", "/v0.2/auth/token", {
       grant_type: "client_credentials",
       client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
       client_assertion: assertion,
@@ -192,32 +192,32 @@ export class DossyClient {
     return body.access_token;
   }
 
-  async listMarketplaces(): Promise<Record<string, unknown>> {
-    return this.call("GET", "/v0.1/marketplaces", undefined, "agent");
+  async listBoards(): Promise<Record<string, unknown>> {
+    return this.call("GET", "/v0.2/boards", undefined, "agent");
   }
 
   async postRequest(document: unknown, authorizationRef = newOperationId(), options?: MutationOptions): Promise<Record<string, unknown>> {
-    const doc = document as { marketplace_id: string; expires_at: string };
-    return this.mutate("/v0.1/requests", {
+    const doc = document as { board_id: string; expires_at: string };
+    return this.mutate("/v0.2/requests", {
       options,
       action: "post_request",
-      target: { type: "marketplace", id: doc.marketplace_id },
+      target: { type: "board", id: doc.board_id },
       payload: document,
-      audience: doc.marketplace_id,
+      audience: doc.board_id,
       permittedFields: ["document"],
       authorizationRef,
       permissionExpiresAt: doc.expires_at,
     });
   }
 
-  async listRequests(marketplaceId: string, cursor?: string): Promise<Record<string, unknown>> {
+  async listRequests(boardId: string, cursor?: string): Promise<Record<string, unknown>> {
     const query = new URLSearchParams({ protocol: PROTOCOL });
     if (cursor) query.set("cursor", cursor);
-    return this.call("GET", `/v0.1/marketplaces/${marketplaceId}/requests?${query}`, undefined, "agent");
+    return this.call("GET", `/v0.2/boards/${boardId}/requests?${query}`, undefined, "agent");
   }
 
   async getRequest(requestId: string): Promise<Record<string, unknown>> {
-    return this.call("GET", `/v0.1/requests/${requestId}`, undefined, "agent");
+    return this.call("GET", `/v0.2/requests/${requestId}`, undefined, "agent");
   }
 
   async submitOffer(
@@ -228,7 +228,7 @@ export class DossyClient {
     options?: MutationOptions,
   ): Promise<Record<string, unknown>> {
     const declared = (payload as { declared_fields: string[] }).declared_fields;
-    return this.mutate(`/v0.1/requests/${requestId}/offers`, {
+    return this.mutate(`/v0.2/requests/${requestId}/offers`, {
       options,
       action: "submit_offer",
       target: { type: "request", id: requestId },
@@ -242,15 +242,15 @@ export class DossyClient {
   }
 
   async listOffers(requestId: string): Promise<Record<string, unknown>> {
-    return this.call("GET", `/v0.1/requests/${requestId}/offers`, undefined, "agent");
+    return this.call("GET", `/v0.2/requests/${requestId}/offers`, undefined, "agent");
   }
 
   async inbox(): Promise<Record<string, unknown>> {
-    return this.call("GET", "/v0.1/inbox", undefined, "agent");
+    return this.call("GET", "/v0.2/inbox", undefined, "agent");
   }
 
   async acceptOffer(offerId: string, payload: unknown, authorizationRef: string, stateVersion: number, offerDigest: string, options?: MutationOptions): Promise<Record<string, unknown>> {
-    return this.mutate(`/v0.1/offers/${offerId}/accept`, {
+    return this.mutate(`/v0.2/offers/${offerId}/accept`, {
       options,
       action: "accept_offer",
       target: { type: "offer", id: offerId },
@@ -265,7 +265,7 @@ export class DossyClient {
   }
 
   async confirmConnection(connectionId: string, stateVersion: number, authorizationRef: string, options?: MutationOptions): Promise<Record<string, unknown>> {
-    return this.mutate(`/v0.1/connections/${connectionId}/confirm`, {
+    return this.mutate(`/v0.2/connections/${connectionId}/confirm`, {
       options,
       action: "confirm_connection",
       target: { type: "connection", id: connectionId },
@@ -280,7 +280,7 @@ export class DossyClient {
 
   async sendMessage(connectionId: string, payload: unknown, authorizationRef: string, stateVersion?: number, options?: MutationOptions): Promise<Record<string, unknown>> {
     const messageType = (payload as { message_type: string }).message_type;
-    return this.mutate(`/v0.1/connections/${connectionId}/messages`, {
+    return this.mutate(`/v0.2/connections/${connectionId}/messages`, {
       options,
       action: "send_message",
       target: { type: "connection", id: connectionId },
@@ -294,12 +294,12 @@ export class DossyClient {
   }
 
   async listMessages(connectionId: string): Promise<Record<string, unknown>> {
-    return this.call("GET", `/v0.1/connections/${connectionId}/messages`, undefined, "agent");
+    return this.call("GET", `/v0.2/connections/${connectionId}/messages`, undefined, "agent");
   }
 
   async withdraw(resource: "requests" | "offers" | "connections", id: string, stateVersion: number | undefined, authorizationRef: string, options?: MutationOptions): Promise<Record<string, unknown>> {
     const type = resource === "requests" ? "request" : resource === "offers" ? "offer" : "connection";
-    return this.mutate(`/v0.1/${resource}/${id}/withdraw`, {
+    return this.mutate(`/v0.2/${resource}/${id}/withdraw`, {
       options,
       action: "withdraw",
       target: { type, id },
@@ -314,11 +314,11 @@ export class DossyClient {
 
   async reputation(subject: string, requestId?: string): Promise<Record<string, unknown>> {
     const query = requestId ? `?request_id=${encodeURIComponent(requestId)}` : "";
-    return this.call("GET", `/v0.1/reputation/${subject}${query}`, undefined, "agent");
+    return this.call("GET", `/v0.2/reputation/${subject}${query}`, undefined, "agent");
   }
 
   async revokeAuthorization(ref: string, options?: MutationOptions): Promise<Record<string, unknown>> {
-    return this.mutate(`/v0.1/authorizations/${ref}/revoke`, {
+    return this.mutate(`/v0.2/authorizations/${ref}/revoke`, {
       options,
       action: "revoke_authorization",
       target: { type: "authorization", id: ref },
@@ -331,10 +331,10 @@ export class DossyClient {
   }
 
   async reportAbuse(report: unknown, authorizationRef: string, options?: MutationOptions): Promise<Record<string, unknown>> {
-    return this.mutate("/v0.1/reports", {
+    return this.mutate("/v0.2/reports", {
       options,
       action: "report_abuse",
-      target: { type: "marketplace", id: "reports" },
+      target: { type: "board", id: "reports" },
       payload: report,
       audience: "reports",
       permittedFields: ["report"],
@@ -469,7 +469,7 @@ export class DossyClient {
     try {
       return await this.send(method, path, body, auth);
     } catch (error) {
-      if (!canRefresh || !(error instanceof ProtocolClientError) || error.code !== "unauthorized" || path === "/v0.1/oauth/token") throw error;
+      if (!canRefresh || !(error instanceof ProtocolClientError) || error.code !== "unauthorized" || path === "/v0.2/oauth/token") throw error;
       await this.issueToken(this.agentId as string, this.signingKey as CryptoKey);
       return this.send(method, path, body, auth);
     }

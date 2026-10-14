@@ -19,13 +19,13 @@ export type SyncResult = {
 };
 
 /**
- * Recovers every still-open request in a marketplace and hands each new one to `onNew` once.
+ * Recovers every still-open request in a board and hands each new one to `onNew` once.
  * Position, deduplication, gaps, and failures stay in the local store. Nothing is reported to the
  * network. A callback that throws leaves its request pending, so the next run offers it again.
  */
-export async function syncMarketplace(
+export async function syncBoard(
   client: DossyClient,
-  marketplaceId: string,
+  boardId: string,
   store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
 ): Promise<SyncResult> {
@@ -33,17 +33,17 @@ export async function syncMarketplace(
   const done = (): SyncResult => ({ prompted: result.prompted, failed: result.failed });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await syncOnce(client, marketplaceId, store, onNew, result);
-      await retryPending(client, marketplaceId, store, onNew, result);
+      await syncOnce(client, boardId, store, onNew, result);
+      await retryPending(client, boardId, store, onNew, result);
       return done();
     } catch (error) {
       if (error instanceof ProtocolClientError && error.code === "cursor_expired") {
         store.gaps.push({
-          marketplaceId,
+          boardId,
           at: client.clock.now().toISOString(),
           detail: "Feed cursor expired. Open requests were snapshotted again. Expired requests in the gap were not claimed as considered.",
         });
-        delete store.cursors[marketplaceId];
+        delete store.cursors[boardId];
         continue;
       }
       throw error;
@@ -56,38 +56,38 @@ type RunState = SyncResult & { attempted: Set<string> };
 
 async function syncOnce(
   client: DossyClient,
-  marketplaceId: string,
+  boardId: string,
   store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
   result: RunState,
 ): Promise<void> {
-  const state = { ...(store.cursors[marketplaceId] ?? { phase: "snapshot" as const }) };
+  const state = { ...(store.cursors[boardId] ?? { phase: "snapshot" as const }) };
   if (state.phase === "snapshot") {
     let cursor = state.snapshotCursor;
     for (;;) {
-      const page = await client.listRequests(marketplaceId, cursor) as Page;
+      const page = await client.listRequests(boardId, cursor) as Page;
       if (page.feed_cursor && !state.feedCursor) state.feedCursor = page.feed_cursor;
-      for (const item of page.requests ?? []) await consider(client, marketplaceId, store, item, onNew, result);
+      for (const item of page.requests ?? []) await consider(client, boardId, store, item, onNew, result);
       if (!page.next_cursor) break;
       cursor = page.next_cursor;
-      store.cursors[marketplaceId] = { ...state, snapshotCursor: cursor };
+      store.cursors[boardId] = { ...state, snapshotCursor: cursor };
     }
     state.phase = "feed";
     state.snapshotCursor = undefined;
-    store.cursors[marketplaceId] = { ...state };
+    store.cursors[boardId] = { ...state };
   }
   for (;;) {
-    const feed = await client.listRequests(marketplaceId, state.feedCursor) as Page;
-    for (const item of feed.mutations ?? []) await consider(client, marketplaceId, store, item, onNew, result);
+    const feed = await client.listRequests(boardId, state.feedCursor) as Page;
+    for (const item of feed.mutations ?? []) await consider(client, boardId, store, item, onNew, result);
     if (feed.next_cursor) state.feedCursor = feed.next_cursor;
-    store.cursors[marketplaceId] = { ...state };
+    store.cursors[boardId] = { ...state };
     if (!feed.more) break;
   }
 }
 
 async function consider(
   client: DossyClient,
-  marketplaceId: string,
+  boardId: string,
   store: SyncStore,
   item: Listed,
   onNew: (request: Record<string, unknown>) => Promise<void>,
@@ -103,7 +103,7 @@ async function consider(
     previous.state = state;
     if (previous.prompted || state !== "open") return;
   } else {
-    store.seen[key] = { digest, state, prompted: false, marketplaceId };
+    store.seen[key] = { digest, state, prompted: false, boardId };
   }
   if (state === "open") await prompt(store, key, full, onNew, result);
 }
@@ -130,13 +130,13 @@ async function prompt(
 
 async function retryPending(
   client: DossyClient,
-  marketplaceId: string,
+  boardId: string,
   store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
   result: RunState,
 ): Promise<void> {
   for (const [key, record] of Object.entries(store.seen)) {
-    if (record.prompted || record.state !== "open" || record.marketplaceId !== marketplaceId) continue;
+    if (record.prompted || record.state !== "open" || record.boardId !== boardId) continue;
     const requestId = key.slice(key.lastIndexOf(":") + 1);
     let full: Record<string, unknown>;
     try {

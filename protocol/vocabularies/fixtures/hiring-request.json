@@ -1,9 +1,9 @@
 {
-  "protocol": "dcp/0.1",
+  "protocol": "dcp/0.2",
   "revision": 1,
   "class": "hiring",
   "vocabulary": "core/0.1",
-  "marketplace_id": "synthetic-startup",
+  "board_id": "synthetic-startup",
   "tags": ["role:growth-lead", "industry:b2b-saas", "seniority:senior"],
   "criteria": {
     "required_tags": ["role:growth-lead"],

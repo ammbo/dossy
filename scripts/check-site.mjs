@@ -67,7 +67,7 @@ const now = new Date();
 const key = await generateEncryptionPair();
 validateRequestDocument({
   protocol: bounds.protocol, revision: 1, vocabulary: bounds.vocabulary,
-  marketplace_id: sample.marketplace_id, class: sample.class, tags: sample.tags,
+  board_id: sample.board_id, class: sample.class, tags: sample.tags,
   criteria: sample.criteria, terms: sample.terms, note: sample.note,
   expires_at: new Date(now.getTime() + sample.expires_in_hours * 3600_000).toISOString(),
   max_connections: sample.max_connections,

@@ -32,8 +32,8 @@ async function bridgeFor(network: ConformanceTarget, label: string) {
   return { bridge, human, store, party };
 }
 
-const hiring = (marketplaceId: string) => ({
-  marketplace_id: marketplaceId,
+const hiring = (boardId: string) => ({
+  board_id: boardId,
   class: "hiring",
   tags: ["role:growth-lead", "industry:b2b-saas"],
   criteria: { required_tags: ["role:growth-lead"], locations: [], work_mode: ["remote"] },
@@ -47,20 +47,20 @@ suite("MCP bridge end to end", () => {
     const requester = await bridgeFor(target!, "bridge-requester");
     const responder = await bridgeFor(target!, "bridge-responder");
 
-    const invalid = await requester.bridge.publishRequest({ ...hiring(target!.marketplaceId), criteria: {} }).catch((error: Error) => error.message);
+    const invalid = await requester.bridge.publishRequest({ ...hiring(target!.boardId), criteria: {} }).catch((error: Error) => error.message);
     expect(invalid).toMatch(/not valid yet/);
     expect(requester.human.shown).toHaveLength(0);
 
-    const published = await requester.bridge.publishRequest(hiring(target!.marketplaceId));
+    const published = await requester.bridge.publishRequest(hiring(target!.boardId));
     expect(published.sent).toBe(true);
     const shownDocument = requester.human.shown[0]!.disclosure as Record<string, unknown>;
     expect(shownDocument.reply_key).toBeUndefined();
     expect(requester.human.shown[0]!.notes?.join(" ")).toMatch(/reputation/);
 
-    const found = await responder.bridge.checkRequests(target!.marketplaceId);
+    const found = await responder.bridge.checkRequests(target!.boardId);
     const request = (found.new_requests as Record<string, unknown>[]).find((item) => item.request_id === published.request_id)!;
     expect(request.note).toMatchObject({ untrusted_text: hiring("").note });
-    expect((await responder.bridge.checkRequests(target!.marketplaceId)).new_requests).toEqual([]);
+    expect((await responder.bridge.checkRequests(target!.boardId)).new_requests).toEqual([]);
 
     const offered = await responder.bridge.offerInterest({ request_id: String(published.request_id), allow_connection: false, available_from: "2026-11-01" });
     expect(offered.sent).toBe(true);
@@ -98,7 +98,7 @@ suite("MCP bridge end to end", () => {
   it("sends nothing when the human declines", async () => {
     const requester = await bridgeFor(target!, "decline-requester");
     const responder = await bridgeFor(target!, "decline-responder");
-    const published = await requester.bridge.publishRequest(hiring(target!.marketplaceId));
+    const published = await requester.bridge.publishRequest(hiring(target!.boardId));
     responder.human.decide = () => false;
     const declined = await responder.bridge.offerInterest({ request_id: String(published.request_id), allow_connection: true });
     expect(declined).toMatchObject({ sent: false, declined: true });
@@ -112,13 +112,13 @@ suite("MCP bridge end to end", () => {
     const original = requester.bridge.client.fetchImpl;
     let down = true;
     requester.bridge.client.fetchImpl = async (input, init) => {
-      if (down && init?.method === "POST" && String(input).endsWith("/v0.1/requests")) {
+      if (down && init?.method === "POST" && String(input).endsWith("/v0.2/requests")) {
         await original(input, init);
         throw new TypeError("fetch failed");
       }
       return original(input, init);
     };
-    const queued = await requester.bridge.publishRequest(hiring(target!.marketplaceId));
+    const queued = await requester.bridge.publishRequest(hiring(target!.boardId));
     expect(queued).toMatchObject({ sent: false, queued: true });
     expect(requester.store.state.outbox).toHaveLength(1);
     down = false;
@@ -127,7 +127,7 @@ suite("MCP bridge end to end", () => {
     const requestId = String((flushed[0]!.result as Record<string, unknown>).request_id);
     expect(requester.store.state.outbox).toEqual([]);
     expect(Object.keys(requester.store.state.keys.reply)).toContain(requestId);
-    const page = await requester.bridge.client.listRequests(target!.marketplaceId);
+    const page = await requester.bridge.client.listRequests(target!.boardId);
     const digest = (await requester.bridge.client.getRequest(requestId)).document_digest;
     expect((page.requests as { document_digest: string }[]).filter((item) => item.document_digest === digest)).toHaveLength(1);
   });

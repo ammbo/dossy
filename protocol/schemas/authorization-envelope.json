@@ -20,7 +20,7 @@
     "exp"
   ],
   "properties": {
-    "protocol": { "const": "dcp/0.1" },
+    "protocol": { "const": "dcp/0.2" },
     "issuer": { "type": "string", "format": "uri" },
     "operation_id": { "type": "string", "minLength": 8, "maxLength": 128 },
     "agent_id": { "type": "string", "minLength": 8, "maxLength": 128 },
@@ -41,7 +41,7 @@
       "additionalProperties": false,
       "required": ["type", "id"],
       "properties": {
-        "type": { "enum": ["marketplace", "request", "offer", "connection", "authorization"] },
+        "type": { "enum": ["board", "request", "offer", "connection", "authorization"] },
         "id": { "type": "string", "minLength": 1, "maxLength": 128 }
       }
     },

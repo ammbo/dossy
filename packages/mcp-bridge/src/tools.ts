@@ -1,6 +1,6 @@
 import type { Bridge } from "./bridge.js";
 
-export const INSTRUCTIONS = `This server connects you to a private-context network: community request marketplaces for introductions, advice, hiring, and events.
+export const INSTRUCTIONS = `This server connects you to a private-context network: community request boards for introductions, advice, hiring, and events.
 
 How to act for your human:
 - Consider requests privately. Use what you already know about your human, but never send their private context, evidence, or reasoning anywhere.
@@ -35,7 +35,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "network_status",
-    description: "Show the network, your marketplaces and their posting budgets, coverage gaps to tell your human about, and approved actions still waiting to send.",
+    description: "Show the network, your boards and their posting budgets, coverage gaps to tell your human about, and approved actions still waiting to send.",
     inputSchema: obj({}),
     annotations: read,
     run: (bridge) => bridge.networkStatus(),
@@ -49,10 +49,10 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "check_requests",
-    description: "Catch up on every marketplace (or one) and return requests your human has not seen yet, with a local triage hint. The network records nothing about what you read.",
-    inputSchema: obj({ marketplace_id: str("Only this marketplace.") }),
+    description: "Catch up on every board (or one) and return requests your human has not seen yet, with a local triage hint. The network records nothing about what you read.",
+    inputSchema: obj({ board_id: str("Only this board.") }),
     annotations: read,
-    run: (bridge, args) => bridge.checkRequests(args.marketplace_id as string | undefined),
+    run: (bridge, args) => bridge.checkRequests(args.board_id as string | undefined),
   },
   {
     name: "get_request",
@@ -84,9 +84,9 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "publish_request",
-    description: "Draft a request and ask your human to approve publishing it to one marketplace. Fills in the protocol fields and a fresh encryption key. Returns field errors to fix if the draft is invalid.",
+    description: "Draft a request and ask your human to approve publishing it to one board. Fills in the protocol fields and a fresh encryption key. Returns field errors to fix if the draft is invalid.",
     inputSchema: obj({
-      marketplace_id: str("Where to publish."),
+      board_id: str("Where to publish."),
       class: str("Request class.", { enum: ["introduction", "advice", "hiring", "event"] }),
       tags: { type: "array", items: { type: "string" }, description: "namespace:value tags, for example role:growth-lead." },
       criteria: { type: "object", description: "Class criteria. hiring: required_tags, locations, work_mode. introduction: target_ref. advice: required_tags. event: locations." },
@@ -96,7 +96,7 @@ export const TOOLS: Tool[] = [
       offer_fields: { type: "array", items: { type: "string" }, description: "Fields responders may include besides interest." },
       note: str("Optional plain-text note, at most 512 characters."),
       display_label: str("Optional label such as 'Startup hiring team'. Not identity verification."),
-    }, ["marketplace_id", "class", "tags", "criteria", "terms"]),
+    }, ["board_id", "class", "tags", "criteria", "terms"]),
     annotations: write,
     run: (bridge, args) => bridge.publishRequest(args as never),
   },
@@ -169,7 +169,7 @@ export const TOOLS: Tool[] = [
       category: str("Report category.", { enum: ["flooding", "false_claim", "consent", "third_party", "credential", "other"] }),
       description: str("At most 512 characters."),
       transaction_ids: { type: "array", items: { type: "string" }, maxItems: 10, description: "Request, offer, or connection ids." },
-      marketplace_id: str("The marketplace involved."),
+      board_id: str("The board involved."),
     }, ["category", "description", "transaction_ids"]),
     annotations: write,
     run: (bridge, args) => bridge.reportAbuse(args as never),

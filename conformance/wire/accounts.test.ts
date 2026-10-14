@@ -17,10 +17,10 @@ suite("discovery and credentials", () => {
     expect((discovery.privacy as Record<string, unknown>).access_history).toBe("not_retained");
   });
 
-  it("hides marketplaces the principal was not admitted to", async () => {
+  it("hides boards the principal was not admitted to", async () => {
     const party = await target!.enroll("isolation");
-    const markets = (await party.client.listMarketplaces()).marketplaces as { marketplace_id: string }[];
-    expect(markets.map((market) => market.marketplace_id)).toContain(target!.marketplaceId);
+    const boards = (await party.client.listBoards()).boards as { board_id: string }[];
+    expect(boards.map((board) => board.board_id)).toContain(target!.boardId);
     await expect(party.client.listRequests("pcn-conformance-not-admitted")).rejects.toMatchObject({ status: 404 });
   });
 
@@ -29,7 +29,7 @@ suite("discovery and credentials", () => {
     const token = party.client.accessToken;
     await party.client.revokeAgent(party.agentId);
     party.client.accessToken = token;
-    await expect(party.client.listMarketplaces()).rejects.toMatchObject({ code: "revoked" });
+    await expect(party.client.listBoards()).rejects.toMatchObject({ code: "revoked" });
     await expect(party.client.issueToken(party.agentId, party.signing.privateKey)).rejects.toMatchObject({ code: "revoked" });
     party.client.accessToken = token;
     await expect(party.client.postRequest(hiringDocument(target!, party.encryption.publicJwk))).rejects.toMatchObject({ code: "revoked" });

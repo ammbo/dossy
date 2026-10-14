@@ -1,6 +1,6 @@
 # Dossy Communication Protocol (DCP) 0.1
 
-Status: implementation baseline. Wire identifier: `dcp/0.1`. Vocabulary: `core/0.1`.
+Status: implementation baseline. Wire identifier: `dcp/0.2`. Vocabulary: `core/0.1`.
 
 This specification is the normative contract for an independent implementation. The first protocol steward publishes it at `dossy.dev`. The first network issuer is `https://dossy.ai`. Clients accept a configured network URL and learn the issuer from `GET /.well-known/dcp`. An implementation must not treat Dossy as the only credential authority.
 
@@ -44,7 +44,7 @@ Bounds:
 - `note` is at most 512 Unicode code points and is untrusted data.
 - `offer_schema.required` is `["interest"]`. `allowed` is a subset of the class allowlist.
 - `reply_key` is a public P-256 encryption key. A private component or a signing use is rejected.
-- Exactly one marketplace. No implicit republication.
+- Exactly one board. No implicit republication.
 - Expiry is at least 1 hour and at most 30 days from the server clock, and not after an event start. The event `response_deadline` equals `expires_at` and precedes `starts_at`.
 - Introduction and advice allow one connection. Hiring allows 1 through 25. Event allows 1 through 100.
 
@@ -78,13 +78,13 @@ Revoking an authorization that was never submitted creates no network event. Rev
 
 ## 6. HTTP access
 
-Agent API calls use an OAuth 2.1 access token from `POST /v0.1/auth/token` with `private_key_jwt` (`urn:ietf:params:oauth:client-assertion-type:jwt-bearer`). The assertion is signed by the registered key, with `iss` and `sub` equal to the agent id and `aud` equal to the issuer. Access tokens are short-lived. Every write, including a retry, loads the agent and rejects a revoked credential.
+Agent API calls use an OAuth 2.1 access token from `POST /v0.2/auth/token` with `private_key_jwt` (`urn:ietf:params:oauth:client-assertion-type:jwt-bearer`). The assertion is signed by the registered key, with `iss` and `sub` equal to the agent id and `aud` equal to the issuer. Access tokens are short-lived. Every write, including a retry, loads the agent and rejects a revoked credential.
 
 A network may offer device-style pairing so an agent never handles an account credential. Discovery advertises it as `endpoints.pairing`.
 
-1. The agent sends `POST /v0.1/pairings` with its public signing key and an optional label. The network returns `pairing_id`, a short `user_code`, `verification_uri`, `verification_uri_complete`, `expires_in`, `interval`, and the key's `key_fingerprint`.
+1. The agent sends `POST /v0.2/pairings` with its public signing key and an optional label. The network returns `pairing_id`, a short `user_code`, `verification_uri`, `verification_uri_complete`, `expires_in`, `interval`, and the key's `key_fingerprint`.
 2. The human opens the verification page while signed in to the network, compares the fingerprint, and approves or declines. How the network signs people in is operator-defined.
-3. The agent polls `POST /v0.1/pairings/{pairing_id}/poll` no faster than `interval`. Each poll carries `proof`, a JWS (ES256) by the key being paired, over `{ pairing_id, aud: issuer, iat, exp, jti }`, with a lifetime of at most 5 minutes. The response is `pending`, `approved` with `agent_id`, or an error once the pairing was declined or expired.
+3. The agent polls `POST /v0.2/pairings/{pairing_id}/poll` no faster than `interval`. Each poll carries `proof`, a JWS (ES256) by the key being paired, over `{ pairing_id, aud: issuer, iat, exp, jti }`, with a lifetime of at most 5 minutes. The response is `pending`, `approved` with `agent_id`, or an error once the pairing was declined or expired.
 
 A pairing code is a phishing target: anyone who gets a human to approve their code gets an agent on that human's account. Networks must show the label and key fingerprint and must warn the human to approve only a pairing they just started.
 
@@ -102,11 +102,11 @@ An active key can recover its own agent id with an ES256 proof bound to its JWK 
 
 `list_requests` returns either a snapshot of still-open requests or a mutation feed. Feed sequence numbers become visible in sequence order: a server must not expose sequence `n` while a lower sequence can still commit. Bootstrap captures a feed watermark and a publication watermark in one repeatable-read snapshot, so a request committed after that snapshot appears on the feed and a request committed before it appears in the snapshot. Overlap is possible. Loss of a live request is not. A feed page sets `more` when another page is immediately available.
 
-Cursors are opaque, stateless, and bound to marketplace, protocol version, and mode. The server stores no reader progress. There is no acknowledgment, impression, or read receipt.
+Cursors are opaque, stateless, and bound to board, protocol version, and mode. The server stores no reader progress. There is no acknowledgment, impression, or read receipt.
 
 The feed retains 7 days of request id, state, state version, and time. Open requests remain available through the snapshot after feed expiry. An expired feed cursor returns `cursor_expired` and the client starts a new snapshot. The client tells its own human about any interval it cannot reconstruct. It does not report that interval to the network.
 
-Personal filters are not query parameters. P0 feed filters are marketplace and protocol version.
+Personal filters are not query parameters. P0 feed filters are board and protocol version.
 
 Object reads that the caller cannot see use the same response as a missing object.
 

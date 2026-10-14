@@ -17,9 +17,9 @@ suite("requests", () => {
 
   it("caps open requests, and a withdrawal does not refund the publication budget", async () => {
     const requester = await target!.enroll("budget");
-    const markets = (await requester.client.listMarketplaces()).marketplaces as { marketplace_id: string; limits: { open: number; publications: number } }[];
-    const market = markets.find((item) => item.marketplace_id === target!.marketplaceId)!;
-    const limits = { open_requests: market.limits.open, publications_per_24h: market.limits.publications };
+    const boards = (await requester.client.listBoards()).boards as { board_id: string; limits: { open: number; publications: number } }[];
+    const board = boards.find((item) => item.board_id === target!.boardId)!;
+    const limits = { open_requests: board.limits.open, publications_per_24h: board.limits.publications };
     const ids: string[] = [];
     for (let index = 0; index < limits.open_requests; index += 1) {
       ids.push(String((await requester.client.postRequest(hiringDocument(target!, requester.encryption.publicJwk, { note: `open ${index}` }))).request_id));
@@ -39,7 +39,7 @@ suite("requests", () => {
     let dropped = false;
     requester.client.fetchImpl = async (input, init) => {
       const response = await original(input, init);
-      if (!dropped && init?.method === "POST" && String(input).endsWith("/v0.1/requests")) {
+      if (!dropped && init?.method === "POST" && String(input).endsWith("/v0.2/requests")) {
         dropped = true;
         throw new TypeError("fetch failed");
       }
@@ -49,7 +49,7 @@ suite("requests", () => {
     const created = await requester.client.postRequest(hiringDocument(target!, requester.encryption.publicJwk, { note }));
     requester.client.fetchImpl = original;
     expect(dropped).toBe(true);
-    const page = await requester.client.listRequests(target!.marketplaceId);
+    const page = await requester.client.listRequests(target!.boardId);
     const matching = (page.requests as { document_digest: string }[]).filter((item) => item.document_digest === created.document_digest);
     expect(matching).toHaveLength(1);
   });

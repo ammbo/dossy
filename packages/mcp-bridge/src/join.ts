@@ -54,8 +54,8 @@ export async function joinFromLink(store: Keystore, link: string, options: { ema
   if (store.state.agent_id) {
     const known = store.state.joined_invites?.[inviteDigest];
     if (known) {
-      const memberships = (await client.listMarketplaces()).marketplaces as Record<string, unknown>[];
-      if (memberships.some((m) => m.marketplace_id === known.id)) return { status: "connected", agent_id: store.state.agent_id, community: known };
+      const memberships = (await client.listBoards()).boards as Record<string, unknown>[];
+      if (memberships.some((m) => m.board_id === known.id)) return { status: "connected", agent_id: store.state.agent_id, community: known };
     }
     const details = await client.invitation(invitation.invite);
     const joined = await client.joinCommunity(invitation.invite);

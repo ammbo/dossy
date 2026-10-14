@@ -25,7 +25,7 @@ suite("offers and silence", () => {
     expect(localDecline()).toEqual({ action: "decline" });
     responder.client.fetchImpl = original;
     // Token refreshes carry no decision. Everything else after the fetch would.
-    expect(calls.filter((call) => !call.endsWith("/v0.1/oauth/token"))).toEqual([`GET /v0.1/requests/${request.request_id}`]);
+    expect(calls.filter((call) => !call.endsWith("/v0.2/oauth/token"))).toEqual([`GET /v0.2/requests/${request.request_id}`]);
     expect(await requester.client.listOffers(String(request.request_id))).toEqual(before.offers);
     expect(await requester.client.getRequest(String(request.request_id))).toEqual(before.view);
     expect(await lifetime(requester)).toEqual(before.counts);
@@ -74,7 +74,7 @@ suite("offers and silence", () => {
     const request = await requester.client.postRequest(hiringDocument(target!, requester.encryption.publicJwk));
     const { offer } = await submitInterest(target!, responder, request, "preauthorized");
     const original = requester.client.fetchImpl;
-    requester.client.fetchImpl = async (input, init) => original(String(input).replace(/\/v0\.1\/offers\/[^/]+\/accept/, "/v0.1/reports"), init);
+    requester.client.fetchImpl = async (input, init) => original(String(input).replace(/\/v0\.2\/offers\/[^/]+\/accept/, "/v0.2/reports"), init);
     try {
       await expect(accept(requester, offer)).rejects.toMatchObject({ code: "invalid_schema" });
     } finally {
