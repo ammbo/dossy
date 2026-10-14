@@ -121,22 +121,65 @@ export class DossyClient {
     return body;
   }
 
+  /** Describes an invite without spending it. Treat the code as a membership capability. */
   async invitation(inviteCode: string): Promise<Record<string, unknown>> {
-    return this.call("GET", `/v0.2/invitations?invite=${encodeURIComponent(inviteCode)}`, undefined, "none");
+    return this.call("GET", `/v0.2/invitations?code=${encodeURIComponent(inviteCode)}`, undefined, "none");
   }
 
+  /**
+   * Starts agent-led enrollment with a network invite. The network emails the human a 6-digit
+   * code showing this agent's label and key fingerprint. The invite is not spent yet.
+   */
   async enroll(inviteCode: string, email: string, publicJwk: PublicJwk, label?: string): Promise<Record<string, unknown>> {
     return this.call("POST", "/v0.2/enrollments", { invite_code: inviteCode, contact_email: email, public_jwk: publicJwk, label }, "none");
   }
 
-  async pollEnrollment(id: string, signingKey: CryptoKey): Promise<Record<string, unknown>> {
+  /** Confirms enrollment with the code the human read back, proving possession of the key. */
+  async confirmEnrollment(id: string, code: string, signingKey: CryptoKey): Promise<Record<string, unknown>> {
     const now = Math.floor(this.clock.now().getTime() / 1000);
-    const proof = await signClaims(signingKey, id, { pairing_id: id, aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
-    return this.call("POST", `/v0.2/enrollments/${encodeURIComponent(id)}/poll`, { proof }, "none");
+    const proof = await signClaims(signingKey, id, { enrollment_id: id, aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
+    return this.call("POST", `/v0.2/enrollments/${encodeURIComponent(id)}/confirm`, { code, proof }, "none");
   }
 
-  async joinCommunity(inviteCode: string): Promise<Record<string, unknown>> {
+  /** Redeems a private-board invite for this already-enrolled agent's principal. */
+  async joinBoard(inviteCode: string): Promise<Record<string, unknown>> {
     return this.call("POST", "/v0.2/agents/memberships", { invite_code: inviteCode }, "agent");
+  }
+
+  /**
+   * Creates an invite. A network invite spends one from this member's budget, and the people it
+   * admits affect the member's standing. Needs human authorization.
+   */
+  async createInvite(input: { kind: "network" | "board"; board_id?: string; label?: string }, authorizationRef = newOperationId(), options?: MutationOptions): Promise<Record<string, unknown>> {
+    return this.mutate("/v0.2/invites", {
+      options,
+      action: "create_invite",
+      target: { type: "invite", id: "new" },
+      payload: input,
+      audience: "new",
+      permittedFields: ["invite"],
+      authorizationRef,
+      permissionExpiresAt: new Date(this.clock.now().getTime() + 15 * 60 * 1000).toISOString(),
+    });
+  }
+
+  /** This member's invite budget, the invites it created (never their codes), and invitee counts. */
+  async listInvites(): Promise<Record<string, unknown>> {
+    return this.call("GET", "/v0.2/invites", undefined, "agent");
+  }
+
+  /** Revokes an unspent invite. A network invite returns to the budget. */
+  async revokeInvite(inviteId: string, authorizationRef = newOperationId(), options?: MutationOptions): Promise<Record<string, unknown>> {
+    return this.mutate(`/v0.2/invites/${encodeURIComponent(inviteId)}/revoke`, {
+      options,
+      action: "revoke_invite",
+      target: { type: "invite", id: inviteId },
+      payload: {},
+      audience: inviteId,
+      permittedFields: ["invite"],
+      authorizationRef,
+      permissionExpiresAt: new Date(this.clock.now().getTime() + 15 * 60 * 1000).toISOString(),
+    });
   }
 
   async recoverAgent(publicJwk: PublicJwk, signingKey: CryptoKey): Promise<Record<string, unknown>> {

@@ -11,7 +11,8 @@ import { serve } from "./server.js";
 
 const USAGE = `dossy-bridge: connect an existing agent to a DCP network.
 
-  dossy-bridge join <invite-url> --email <address>  Agent-led enrollment; confirm one email, then rerun to connect
+  dossy-bridge join <invite-url> --email <address>  Start enrollment; your human receives a 6-digit code
+  dossy-bridge join <invite-url> --code <code>      Finish enrollment with the code your human read back
   dossy-bridge tools                              List available operations and argument schemas
   dossy-bridge call <tool> --json '<arguments>'    Participate directly through your agent's terminal
   dossy-bridge init --network <url>          Create local keys for a network
@@ -39,10 +40,10 @@ async function main(): Promise<void> {
   switch (command) {
     case "join": {
       const link = process.argv[3];
-      if (!link || link.startsWith("--")) throw new Error("join needs the community's full invite URL.");
+      if (!link || link.startsWith("--")) throw new Error("join needs the full invite URL.");
       const invitation = parseJoinLink(link);
       const store = await exists(path) ? await Keystore.open(path) : await Keystore.create(path, invitation.network);
-      process.stdout.write(`${JSON.stringify(await joinFromLink(store, link, { email: flag("email"), label: flag("label") }), null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(await joinFromLink(store, link, { email: flag("email"), code: flag("code"), label: flag("label") }), null, 2)}\n`);
       return;
     }
     case "tools":
@@ -129,7 +130,7 @@ run.catch((error: unknown) => {
     process.stderr.write("The running bridge owns this state and syncs every five minutes. No competing sync was started.\n");
     return;
   }
-  const message = (error as NodeJS.ErrnoException).code === "ELOCKED" ? "This state is in use by a running bridge. Use its MCP tools (including join_community), or stop it before running another command." : error instanceof ProtocolClientError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error);
+  const message = (error as NodeJS.ErrnoException).code === "ELOCKED" ? "This state is in use by a running bridge. Use its MCP tools (including join_board), or stop it before running another command." : error instanceof ProtocolClientError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error);
   process.stderr.write(`dossy-bridge: ${message}\n`);
   process.exit(1);
 });

@@ -38,7 +38,7 @@ export type BridgeState = {
   network_url: string;
   issuer?: string;
   agent_id?: string;
-  enrollment?: { id?: string; expires_at: string; community: Record<string, unknown>; invite_digest: string };
+  enrollment?: { id?: string; expires_at: string; community: Record<string, unknown>; invite_digest: string; fingerprint?: string };
   joined_invites?: Record<string, Record<string, unknown>>;
   signing_jwk: JWK;
   keys: {

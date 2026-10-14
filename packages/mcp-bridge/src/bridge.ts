@@ -44,7 +44,7 @@ export class Bridge {
   ) {}
 
   static async start(store: Keystore, approver: Approver, options: { fetchImpl?: typeof fetch; clock?: Clock } = {}): Promise<Bridge> {
-    if (!store.state.agent_id) throw new ToolError("This bridge is not registered with a network yet. Run `dossy-bridge join <invite-url> --email <address>` first.");
+    if (!store.state.agent_id) throw new ToolError("This bridge is not enrolled yet. Run `dossy-bridge join <invite-url> --email <address>`, then again with --code.");
     const clock = options.clock ?? { now: () => new Date() };
     const client = new DossyClient({
       networkUrl: store.state.network_url,
@@ -89,21 +89,19 @@ export class Bridge {
     };
   }
 
-  /** Join another community on this network through an invitation supplied by the human. */
-  async joinCommunity(link: string): Promise<Row> {
+  /** Joins a private board through a board invite the human supplied. Already-enrolled agents only. */
+  async joinBoard(link: string): Promise<Row> {
     const invite = parseJoinLink(link);
     if (invite.network !== this.store.state.network_url) throw new ToolError("This invite belongs to another network. Connect it with a separate bridge state.");
     const digest = digestJson(invite.invite);
     const known = this.store.state.joined_invites?.[digest];
-    if (known) {
-      const memberships = (await this.client.listBoards()).boards as Row[];
-      if (memberships.some((m) => m.board_id === known.id)) return { status: "connected", community: known };
-    }
+    if (known?.board) return { status: "connected", board: known.board };
     const details = await this.client.invitation(invite.invite);
-    await this.client.joinCommunity(invite.invite);
-    this.store.state.joined_invites = { ...this.store.state.joined_invites, [digest]: details.community as Row };
+    if (details.kind !== "board") throw new ToolError("That is a network invite, and this agent is already a member. Give it back unused.");
+    await this.client.joinBoard(invite.invite);
+    this.store.state.joined_invites = { ...this.store.state.joined_invites, [digest]: details };
     await this.store.save(this.now());
-    return { status: "connected", community: details.community };
+    return { status: "connected", board: details.board };
   }
 
   vocabulary(className?: string): Row {

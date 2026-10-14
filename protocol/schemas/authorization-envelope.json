@@ -49,7 +49,9 @@
         "edit_board",
         "pause_board",
         "resume_board",
-        "remove_board"
+        "remove_board",
+        "create_invite",
+        "revoke_invite"
       ]
     },
     "target": {
@@ -57,7 +59,7 @@
       "additionalProperties": false,
       "required": ["type", "id"],
       "properties": {
-        "type": { "enum": ["board", "request", "offer", "connection", "authorization", "merge_proposal", "report"] },
+        "type": { "enum": ["board", "request", "offer", "connection", "authorization", "merge_proposal", "report", "invite"] },
         "id": { "type": "string", "minLength": 1, "maxLength": 128 }
       }
     },

@@ -8,6 +8,7 @@ import connectionAccept from "./schemas/connection-accept.json" with { type: "js
 import discovery from "./schemas/discovery.json" with { type: "json" };
 import display from "./schemas/display.json" with { type: "json" };
 import error from "./schemas/error.json" with { type: "json" };
+import inviteCreate from "./schemas/invite-create.json" with { type: "json" };
 import jwkEnc from "./schemas/jwk-enc.json" with { type: "json" };
 import jwkSig from "./schemas/jwk-sig.json" with { type: "json" };
 import mergePosition from "./schemas/merge-position.json" with { type: "json" };
@@ -41,6 +42,7 @@ export const schemas: Record<string, { $id: string }> = {
   "discovery.json": discovery,
   "display.json": display,
   "error.json": error,
+  "invite-create.json": inviteCreate,
   "jwk-enc.json": jwkEnc,
   "jwk-sig.json": jwkSig,
   "merge-position.json": mergePosition,
