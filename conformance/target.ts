@@ -34,6 +34,11 @@ export interface ConformanceTarget {
   advanceTime?(ms: number): Promise<void>;
   /** Shrinks list page sizes so paging paths run with few requests. */
   setPageSize?(size: number): Promise<void>;
+  /**
+   * Admits a new principal through a member's network invite code, as agent-led enrollment would,
+   * and registers one agent. Reading the emailed code is outside the wire contract.
+   */
+  enrollWithInvite?(label: string, inviteCode: string): Promise<Party>;
   /** Grants the party's principal moderation of open boards. Role grants are operator-defined. */
   grantModerator?(party: Party): Promise<void>;
   /** Approves a pending agent pairing as the party's human would, while signed in. */

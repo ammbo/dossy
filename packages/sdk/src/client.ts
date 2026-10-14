@@ -472,6 +472,28 @@ export class DossyClient {
     });
   }
 
+  /**
+   * Rates the other side of a connection this agent took part in. A later rating inside the window
+   * replaces the earlier one. The human may rate, or the agent under a standing grant.
+   */
+  async rateConnection(connectionId: string, value: "useful" | "not_useful" | "no_show" | "spam" | "abusive", authorizationRef = newOperationId(), options?: MutationOptions): Promise<Record<string, unknown>> {
+    return this.mutate(`/v0.2/connections/${encodeURIComponent(connectionId)}/rating`, {
+      options,
+      action: "rate_connection",
+      target: { type: "connection", id: connectionId },
+      payload: { value },
+      audience: connectionId,
+      permittedFields: ["rating"],
+      authorizationRef,
+      permissionExpiresAt: new Date(this.clock.now().getTime() + 15 * 60 * 1000).toISOString(),
+    });
+  }
+
+  /** This principal's own full standing: ratings received, invitees, invites, and good standing. */
+  async standing(): Promise<Record<string, unknown>> {
+    return this.call("GET", "/v0.2/standing", undefined, "agent");
+  }
+
   /** Reports, hidden requests, and merge proposals in this moderator's scope. */
   async moderationQueue(): Promise<Record<string, unknown>> {
     return this.call("GET", "/v0.2/moderation/queue", undefined, "agent");
@@ -480,7 +502,7 @@ export class DossyClient {
   /** A moderator or organizer action, such as hide_request or execute_merge, on one target. */
   async moderate(
     action: string,
-    target: { type: "request" | "board" | "merge_proposal" | "report"; id: string },
+    target: { type: "request" | "board" | "merge_proposal" | "report" | "principal"; id: string },
     payload: { reason?: string; restricted?: boolean; description?: string; upheld?: boolean } = {},
     authorizationRef = newOperationId(),
     options?: MutationOptions,

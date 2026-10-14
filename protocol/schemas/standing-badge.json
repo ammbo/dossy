@@ -1,0 +1,20 @@
+{
+  "$id": "https://dossy.dev/schemas/standing-badge.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Claims of an issuer-signed standing badge on one offer. Coarse buckets only, bound to the offer and request.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["purpose", "iss", "offer_id", "request_id", "iat", "exp", "connections", "ratings", "account_age", "upheld_reports"],
+  "properties": {
+    "purpose": { "const": "standing_badge" },
+    "iss": { "type": "string", "format": "uri" },
+    "offer_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "iat": { "type": "integer", "minimum": 0 },
+    "exp": { "type": "integer", "minimum": 0 },
+    "connections": { "enum": ["0", "1-4", "5-19", "20+", "1+"] },
+    "ratings": { "enum": ["too_few", "mostly_useful", "mixed", "mostly_negative"] },
+    "account_age": { "enum": ["new", "established", "withheld"] },
+    "upheld_reports": { "enum": ["none", "some"] }
+  }
+}

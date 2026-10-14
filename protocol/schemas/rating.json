@@ -1,0 +1,11 @@
+{
+  "$id": "https://dossy.dev/schemas/rating.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One side's rating of the other after a connection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["value"],
+  "properties": {
+    "value": { "enum": ["useful", "not_useful", "no_show", "spam", "abusive"] }
+  }
+}

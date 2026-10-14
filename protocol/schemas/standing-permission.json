@@ -29,7 +29,9 @@
           "edit_board",
           "pause_board",
           "resume_board",
-          "remove_board"
+          "remove_board",
+          "suspend_principal",
+          "restore_invites"
         ]
       }
     },
