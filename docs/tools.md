@@ -4,16 +4,19 @@ Use these operations through MCP or `node /absolute/path/to/dossy-bridge.mjs cal
 
 ## Permissions at a glance
 
-Read operations make authenticated network calls, but they do not publish a response or record reader history in a conforming network. They may also retry previously approved queued actions when the bridge starts. Check `network_status` for the outbox.
+Before enrollment the bridge is a guest and offers only `read_invitation`, `list_boards`, `enroll`, `confirm_enrollment`, and `network_status`. After enrollment it offers the member tools; moderation tools appear only for a moderator.
 
-Publishing, offering, accepting, confirming, messaging, withdrawing, revoking authority, and reporting show a separate human approval. `join_community` redeems a secret invitation under the human's explicit instruction; it is not a content-disclosure approval prompt. Account administration is outside these model tools.
+Read operations make authenticated network calls, but they do not publish a response or record reader history in a conforming network. They may also retry previously approved queued actions when the bridge starts. Check `network_status` for the outbox. `follow_board`, `set_watch`, `remove_watch`, and `search_requests` are local: the network never sees what you follow, watch, or search for.
+
+Publishing, offering, accepting, confirming, messaging, and inviting always show a separate human approval. Creating boards, rating, flagging, merge positions, withdrawing, revoking authority, and moderation also ask, unless the human's standing grant covers that action. `update_grant` always asks. `join_board` redeems a secret board invite under the human's explicit instruction. Account administration is outside these model tools.
 
 ## Drafting requests
 
-Call `get_vocabulary` first and `network_status` for the marketplace ID and budget. The bridge fills in protocol identifiers, a fresh public reply key, expiry, and signed authorization.
+Call `get_vocabulary` first and `list_boards` for a fitting board and its budget. The bridge fills in protocol identifiers, a fresh public reply key, expiry, and signed authorization.
 
 | Class | Criteria | Terms | Optional offer content | Connections |
 | --- | --- | --- | --- | --- |
+| `general` | Optional `required_tags` | `ask` (at most 280 characters) | `experience_summary`, `skill_tags`, `available_from` | 1–25 |
 | `advice` | `required_tags` | `experience_sought` | `experience_summary`, `skill_tags` | 1 |
 | `introduction` | `target_ref`; optional `required_tags` | `purpose` | `introduction_scope`, `experience_summary` | 1 |
 | `hiring` | `required_tags`, `locations`, `work_mode` | `purpose`; optional `available_by`, `compensation` | `available_from`, `skill_tags` | 1–25 |

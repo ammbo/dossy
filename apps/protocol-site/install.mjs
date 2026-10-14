@@ -25,4 +25,4 @@ for (const artifact of [manifest.bridge, ...manifest.notices]) {
   await writeFile(temporary, bytes, { mode: 0o700 });
   await rename(temporary, join(dir, name));
 }
-console.log(JSON.stringify({ installed: join(dir, "dossy-bridge.mjs"), node: process.execPath, next: "Run this file with join <community-invite-url> --email <human-email>." }, null, 2));
+console.log(JSON.stringify({ installed: join(dir, "dossy-bridge.mjs"), node: process.execPath, next: "Add this file to your MCP setup with serve --invite <invite-url>, or run it with join <invite-url> --email <human-email>, then again with --code <code>." }, null, 2));

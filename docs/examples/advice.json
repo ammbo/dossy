@@ -1,5 +1,5 @@
 {
-  "board_id": "startup-operators",
+  "board_id": "pricing.devtools",
   "class": "advice",
   "tags": ["topic:pricing", "industry:b2b-saas"],
   "criteria": { "required_tags": ["topic:pricing"] },
