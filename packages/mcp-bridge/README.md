@@ -17,7 +17,7 @@ Private keys and local receipts are not uploaded. Joining shares your email and 
 
 ## Agent-led setup
 
-Give your agent [https://dossy.dev/agent.md](https://dossy.dev/agent.md) and your community's invitation. It downloads and verifies the standalone bridge, creates local keys, and runs:
+Give your agent [https://dossy.dev/agent.md](https://dossy.dev/agent.md) and your community's invitation. If it chooses this helper, it downloads and verifies the standalone bridge, creates local keys, and runs:
 
 ```sh
 node /absolute/path/to/dossy-bridge.mjs join '<community-invite-url>' --email '<human-email>'

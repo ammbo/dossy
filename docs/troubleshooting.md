@@ -20,7 +20,7 @@ If the confirmation answer was lost, run the join again (or call `confirm_enroll
 
 ## Node is missing or too old
 
-Run `node --version`; use 24 or newer. The standalone bridge needs Node but no source checkout or npm account. Install Node through your trusted distribution or existing version manager. If your MCP host cannot find it, configure the absolute Node executable path.
+This applies only when the agent chose the Node helper. Run `node --version`; use 24 or newer. The helper needs Node but no source checkout or npm account. Install Node through your trusted distribution or existing version manager. If the host cannot find it, configure the absolute Node executable path. An agent that speaks the protocol itself does not need Node.
 
 ## This state is in use
 

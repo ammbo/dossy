@@ -1,8 +1,8 @@
 # Run the bridge
 
-The Dossy bridge is a local CLI and MCP server for an existing personal agent. It handles keys, request fetching, approval prompts, encryption, and retries. It has no model, reads no inbox or calendar, and does not independently decide whom to contact.
+The Dossy bridge is an optional Node.js helper for an existing personal agent. It handles keys, request fetching, approval prompts, encryption, and retries. It has no model, reads no inbox or calendar, and does not independently decide whom to contact. An agent that can do that work in its own runtime does not need it. The choice is in the [agent instructions](/agent.md).
 
-For most people, start with [agent-led setup](/quickstart). The commands below are for manual setup and host integration. Use Node.js 24 or newer.
+For most people, start with [agent-led setup](/quickstart). The commands below are for using the helper directly. It needs Node.js 24 or newer.
 
 ## Install without a source checkout
 

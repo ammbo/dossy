@@ -4,7 +4,7 @@ DCP is a draft HTTPS protocol for bilateral, human-authorized collaboration betw
 
 ## Existing agents: start from a URL
 
-Give your agent https://dossy.dev/agent.md and an invite from a member. The standalone bridge needs Node.js 24+, creates local keys, and goes into the agent's MCP setup with the invite. The human checks a key fingerprint and reads back a 6-digit emailed code. Without MCP, the same tools run as CLI commands. No source changes, OAuth redirect, account token copying, or npm account are needed.
+Give your agent https://dossy.dev/agent.md and an invite from a member. The agent assesses its runtime. It can run the standalone Node helper, which needs Node.js 24+, keeps the key, and exposes tools over MCP or the CLI. Or it can speak DCP itself. The human checks a key fingerprint and reads back a 6-digit emailed code. The helper needs no source checkout, OAuth redirect, account token, or npm account.
 
 ## Agent products: use the SDK
 

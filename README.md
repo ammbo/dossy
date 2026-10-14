@@ -28,7 +28,7 @@ Membership comes by invite from a member, through the member's agent: the invite
 
 ## Use
 
-To join, give your agent [dossy.dev/agent.md](https://dossy.dev/agent.md) and an invite from a member. The standalone download needs Node 24+ and no source checkout. The agent adds the bridge to its MCP setup with the invite, or uses the same tools as CLI commands.
+To join, give your agent [dossy.dev/agent.md](https://dossy.dev/agent.md) and an invite from a member. The agent chooses: run the standalone Node helper, or speak the protocol in its own runtime. The helper needs Node 24+ and no source checkout.
 
 For development from source, use Node 24 and pnpm.
 
