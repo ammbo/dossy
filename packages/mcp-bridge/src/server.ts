@@ -1,7 +1,7 @@
 import type { Readable, Writable } from "node:stream";
 import { BrowserApprover, ElicitationApprover, type Approver } from "./approval.js";
 import { Bridge, ToolError } from "./bridge.js";
-import { findTool, INSTRUCTIONS, rejectSecretArguments, toolDefinitions } from "./tools.js";
+import { findTool, instructionsFor, rejectSecretArguments, toolsFor } from "./tools.js";
 
 // MCP over stdio: one JSON-RPC message per line, UTF-8, no embedded newlines.
 export const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26"];
@@ -20,7 +20,11 @@ export type ServeOptions = {
   connect: (approver: Approver) => Promise<Bridge>;
   /** Used when the host cannot elicit. Defaults to a local page opened in the browser. */
   fallbackApprover?: () => Approver;
+  /** Whether the state is enrolled yet, before the bridge connects. Defaults to member. */
+  mode?: () => "guest" | "member";
 };
+
+type Mode = "guest" | "member";
 
 /** Runs the MCP stdio server until input ends. Requests are handled concurrently, so a tool call that waits for an approval never blocks the approval's own response. */
 export function serve(options: ServeOptions): Promise<void> {
@@ -58,32 +62,57 @@ export function serve(options: ServeOptions): Promise<void> {
     return bridge;
   };
 
+  // A guest bridge offers only onboarding tools; enrolling turns it into a member bridge, and a
+  // member who moderates also gets the moderation tools.
+  const modeOf = (connected?: Bridge): Mode => (connected && (connected as { mode?: Mode }).mode) || options.mode?.() || "member";
+  const moderatorOf = async (connected: Bridge): Promise<boolean> =>
+    typeof (connected as { isModerator?: unknown }).isModerator === "function" ? connected.isModerator() : false;
+  let announced: Mode | undefined;
+
   const handle = async (message: Message): Promise<unknown> => {
     switch (message.method) {
       case "initialize": {
         const params = message.params ?? {};
         const requested = String(params.protocolVersion ?? SUPPORTED_VERSIONS[0]);
         clientCanElicit = Boolean((params.capabilities as Record<string, unknown> | undefined)?.elicitation);
+        announced = modeOf();
         return {
           protocolVersion: SUPPORTED_VERSIONS.includes(requested) ? requested : SUPPORTED_VERSIONS[0],
-          capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "dossy-mcp-bridge", version: "0.2.0" },
-          instructions: INSTRUCTIONS,
+          capabilities: { tools: { listChanged: true } },
+          serverInfo: { name: "dossy-mcp-bridge", version: "0.3.0" },
+          instructions: instructionsFor(announced),
         };
       }
       case "ping":
         return {};
-      case "tools/list":
-        return { tools: toolDefinitions() };
+      case "tools/list": {
+        let connected: Bridge | undefined;
+        try {
+          connected = await ready();
+        } catch {
+          connected = undefined;
+        }
+        const tools = toolsFor(modeOf(connected), connected ? await moderatorOf(connected) : false);
+        return { tools: tools.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, ...(annotations ? { annotations } : {}) })) };
+      }
       case "tools/call": {
         const name = String(message.params?.name ?? "");
-        const tool = findTool(name);
-        if (!tool) throw Object.assign(new Error(`Unknown tool ${name}.`), { rpcCode: INVALID_PARAMS });
+        if (!findTool(name)) throw Object.assign(new Error(`Unknown tool ${name}.`), { rpcCode: INVALID_PARAMS });
         const args = (message.params?.arguments as Record<string, unknown> | undefined) ?? {};
         try {
           rejectSecretArguments(args);
           const connected = await ready();
+          const mode = modeOf(connected);
+          const tool = findTool(name, mode, await moderatorOf(connected));
+          if (!tool) {
+            const text = mode === "guest" ? `${name} is available once your human has joined. Finish enrollment first.` : `${name} is not available to this agent.`;
+            return { content: [{ type: "text", text }], isError: true };
+          }
           const result = await exclusive(() => tool.run(connected, args));
+          if (modeOf(connected) !== announced) {
+            announced = modeOf(connected);
+            write({ method: "notifications/tools/list_changed" });
+          }
           return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result, isError: false };
         } catch (error) {
           const text = error instanceof ToolError || error instanceof Error ? error.message : "The tool failed.";

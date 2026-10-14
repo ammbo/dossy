@@ -39,6 +39,8 @@ export interface ConformanceTarget {
    * and registers one agent. Reading the emailed code is outside the wire contract.
    */
   enrollWithInvite?(label: string, inviteCode: string): Promise<Party>;
+  /** The last enrollment code emailed to an address, as its human would read it. Test networks only. */
+  latestCode?(email: string): Promise<string | undefined>;
   /** Grants the party's principal moderation of open boards. Role grants are operator-defined. */
   grantModerator?(party: Party): Promise<void>;
   /** Approves a pending agent pairing as the party's human would, while signed in. */

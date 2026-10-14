@@ -107,6 +107,59 @@ describe("MCP stdio server", () => {
   });
 });
 
+describe("guest onboarding over MCP", () => {
+  it("offers only onboarding tools to a guest and announces the member tools once enrolled", async () => {
+    const guest = {
+      mode: "guest" as "guest" | "member",
+      isModerator: async () => false,
+      readInvitation: async () => ({ kind: "network" }),
+      confirmEnrollment: async () => {
+        guest.mode = "member";
+        return { status: "connected" };
+      },
+      networkStatus: async () => ({ mode: guest.mode }),
+    };
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const done = serve({ input, output, connect: async () => guest as unknown as Bridge, mode: () => guest.mode });
+    const lines: Rpc[] = [];
+    let buffer = "";
+    output.setEncoding("utf8");
+    output.on("data", (chunk: string) => {
+      buffer += chunk;
+      for (let newline = buffer.indexOf("\n"); newline >= 0; newline = buffer.indexOf("\n")) {
+        lines.push(JSON.parse(buffer.slice(0, newline)) as Rpc);
+        buffer = buffer.slice(newline + 1);
+      }
+    });
+    let id = 0;
+    const call = async (method: string, params: Record<string, unknown> = {}) => {
+      const callId = ++id;
+      input.write(`${JSON.stringify({ jsonrpc: "2.0", id: callId, method, params })}\n`);
+      for (;;) {
+        const found = lines.find((line) => line.id === callId);
+        if (found) return found;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    };
+    const init = await call("initialize", { capabilities: {} });
+    expect(String(init.result?.instructions)).toContain("read_invitation");
+    const names = ((await call("tools/list")).result?.tools as { name: string }[]).map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["read_invitation", "enroll", "confirm_enrollment", "list_boards"]));
+    expect(names).not.toContain("publish_request");
+    const early = await call("tools/call", { name: "publish_request", arguments: {} });
+    expect(early.result?.isError).toBe(true);
+    await call("tools/call", { name: "confirm_enrollment", arguments: { code: "123456" } });
+    expect(lines.some((line) => line.method === "notifications/tools/list_changed")).toBe(true);
+    const after = ((await call("tools/list")).result?.tools as { name: string }[]).map((tool) => tool.name);
+    expect(after).toEqual(expect.arrayContaining(["publish_request", "set_watch", "search_requests", "update_grant", "create_invite"]));
+    expect(after).not.toContain("moderate");
+    expect(after).not.toContain("enroll");
+    input.end();
+    await done;
+  });
+});
+
 describe("browser approval page", () => {
   it("shows the exact disclosure and accepts a decision only from its own page", async () => {
     let url = "";

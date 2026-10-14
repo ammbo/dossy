@@ -18,8 +18,11 @@ const USAGE = `dossy-bridge: connect an existing agent to a DCP network.
   dossy-bridge init --network <url>          Create local keys for a network
   dossy-bridge pair [--label <name>]         Connect this agent to your account: approve the code in your browser
   dossy-bridge register --account-token <t>  Register with an account token instead of pairing
-  dossy-bridge serve                         Run the MCP server on stdio (for your agent host)
-  dossy-bridge sync                          Find new requests now and hold them for check_requests (for cron)
+  dossy-bridge serve [--invite <url>]        Run the MCP server on stdio (for your agent host). With an
+                                             invite and no enrollment yet, it starts as a guest that
+                                             walks your human through joining. DOSSY_INVITE also works.
+  dossy-bridge sync                          Fetch now, apply watches, hold matches for check_requests,
+                                             and notify as the standing grant says (for cron)
   dossy-bridge status                        Show the network, agent, and queued actions
 
 State lives in ${defaultStatePath()} (override with DOSSY_BRIDGE_STATE). It holds private keys
@@ -101,8 +104,26 @@ async function main(): Promise<void> {
       return;
     }
     case "serve": {
-      const store = await Keystore.open(path);
-      await serve({ input: process.stdin, output: process.stdout, connect: (approver) => Bridge.start(store, approver) });
+      const invite = flag("invite") ?? process.env.DOSSY_INVITE;
+      let store: Keystore;
+      if (await exists(path)) {
+        store = await Keystore.open(path);
+      } else if (invite) {
+        store = await Keystore.create(path, parseJoinLink(invite).network);
+      } else {
+        throw new Error(`No bridge state at ${path}. Pass the invite you were given: dossy-bridge serve --invite <url>.`);
+      }
+      // A spent invite left in the setup is inert once the agent is enrolled.
+      if (invite && !store.state.agent_id && parseJoinLink(invite).network === store.state.network_url && store.state.pending_invite !== invite) {
+        store.state.pending_invite = invite;
+        await store.save();
+      }
+      await serve({
+        input: process.stdin,
+        output: process.stdout,
+        connect: (approver) => Bridge.start(store, approver),
+        mode: () => (store.state.agent_id ? "member" : "guest"),
+      });
       return;
     }
     case "sync": {

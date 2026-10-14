@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { exportJWK, generateKeyPair, importJWK, type JWK } from "jose";
 import lockfile from "proper-lockfile";
-import { randomId, type Gap, type FeedCursor, type PublicJwk, type SeenRecord, type SyncStore } from "@dossy/sdk";
+import { randomId, type Gap, type FeedCursor, type PublicJwk, type SeenRecord, type SyncStore, type Watch } from "@dossy/sdk";
 
 /** A key the bridge holds for one object, kept until the object can no longer need it. */
 export type HeldKey = { jwk: JWK; keep_until: string };
@@ -30,10 +30,27 @@ export type PendingSend = {
   keep_until: string;
   /** Local bookkeeping to apply once the network acknowledges the action. */
   effects?: { rename_reply_from?: string; retarget_ref?: string };
+  /** `standing` when the human's standing grant covered the action instead of a fresh approval. */
+  mode?: "human" | "standing";
 };
 
+/**
+ * The human's standing grant, collected during onboarding and changed only with their approval.
+ * It covers the low-risk actions the network accepts under `standing` authorization, and how the
+ * bridge may notify the human. Following boards and watching topics are local and need no grant.
+ */
+export type StandingGrant = {
+  standing_actions: string[];
+  notify: { kind: "none" | "desktop" | "command"; command?: string };
+  expires_at?: string;
+  approved_at: string;
+};
+
+/** A request this agent fetched, kept only while open so the human can search what was seen. */
+export type FetchedRequest = Record<string, unknown> & { request_id: string; expires_at: string };
+
 export type BridgeState = {
-  version: 1;
+  version: 2;
   revision?: number;
   network_url: string;
   issuer?: string;
@@ -56,6 +73,13 @@ export type BridgeState = {
   receipts: Receipt[];
   /** Requests found by a scheduled `dossy-bridge sync`, waiting for the next check_requests. */
   digest?: Record<string, unknown>[];
+  /** A network invite from the agent's setup, used until enrollment and then ignored. */
+  pending_invite?: string;
+  grant?: StandingGrant;
+  /** Boards to surface new requests from. Open boards are read through the network feed. */
+  followed?: string[];
+  watches?: Watch[];
+  fetched?: Record<string, FetchedRequest>;
 };
 
 const RECEIPT_LIMIT = 500;
@@ -91,7 +115,7 @@ export class Keystore implements SyncStore {
     const { privateKey } = await generateKeyPair("ES256", { extractable: true });
     const signing = await exportJWK(privateKey);
     const store = new Keystore(path, {
-      version: 1,
+      version: 2,
       network_url: networkUrl.replace(/\/$/, ""),
       signing_jwk: { ...signing, use: "sig", alg: "ES256" },
       keys: { reply: {}, offer: {}, accept: {} },
@@ -106,8 +130,7 @@ export class Keystore implements SyncStore {
   }
 
   static async open(path: string): Promise<Keystore> {
-    const state = JSON.parse(await readFile(path, "utf8")) as BridgeState;
-    if (state.version !== 1) throw new Error(`Unsupported bridge state version in ${path}.`);
+    const state = migrate(JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>, path);
     return new Keystore(path, state);
   }
 
@@ -178,6 +201,7 @@ export class Keystore implements SyncStore {
     this.state.receipts = this.state.receipts.slice(-RECEIPT_LIMIT);
     this.state.gaps = this.state.gaps.slice(-100);
     this.state.digest = (this.state.digest ?? []).filter((item) => Date.parse(String(item.expires_at)) > now.getTime()).slice(-200);
+    this.state.fetched = Object.fromEntries(Object.entries(this.state.fetched ?? {}).filter(([, item]) => Date.parse(item.expires_at) > now.getTime()).slice(-2000));
   }
 }
 
@@ -186,4 +210,19 @@ export async function withStateSession<T>(path: string, fn: () => Promise<T>): P
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const release = await lockfile.lock(path, { realpath: false, lockfilePath: `${path}.session.lock`, stale: 60_000, retries: 0 });
   try { return await fn(); } finally { await release(); }
+}
+
+/**
+ * Upgrades an older state file in memory. Version 1 named feeds after marketplaces; version 2 keys
+ * position and deduplication by feed and adds the grant, follows, watches, and fetched requests.
+ */
+function migrate(raw: Record<string, unknown>, path: string): BridgeState {
+  if (raw.version === 2) return raw as unknown as BridgeState;
+  if (raw.version !== 1) throw new Error(`Unsupported bridge state version in ${path}.`);
+  const seen = Object.fromEntries(Object.entries((raw.seen ?? {}) as Record<string, Record<string, unknown>>).map(([key, record]) => {
+    const { marketplaceId, boardId, ...rest } = record;
+    return [key, { ...rest, feed: (rest.feed ?? boardId ?? marketplaceId) as string | undefined }];
+  }));
+  const gaps = ((raw.gaps ?? []) as Record<string, unknown>[]).map(({ marketplaceId, boardId, ...rest }) => ({ ...rest, feed: String(rest.feed ?? boardId ?? marketplaceId ?? "") }));
+  return { ...(raw as unknown as BridgeState), version: 2, seen: seen as BridgeState["seen"], gaps: gaps as BridgeState["gaps"] };
 }

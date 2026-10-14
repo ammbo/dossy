@@ -1,3 +1,4 @@
+import { calculateJwkThumbprint } from "jose";
 import {
   assertSchema,
   DossyClient,
@@ -6,19 +7,54 @@ import {
   digestJson,
   loadBounds,
   loadVocabulary,
+  matchWatch,
+  normalizeBoardId,
+  PROTOCOL,
   randomId,
+  searchRequests,
   syncBoard,
+  syncNetwork,
   triage,
   validateRequestDocument,
+  verifyStandingBadge,
+  VOCABULARY,
   type Clock,
   type PublicJwk,
+  type Watch,
 } from "@dossy/sdk";
-import { parseJoinLink } from "./join.js";
+import { joinFromLink, parseJoinLink } from "./join.js";
 import type { Approver, ApprovalRequest } from "./approval.js";
-import type { Keystore, PendingSend } from "./keystore.js";
+import type { FetchedRequest, Keystore, PendingSend, StandingGrant } from "./keystore.js";
+import { notifyHuman, type Notifier } from "./notify.js";
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
+
+/** Actions the network accepts under a standing grant. Anything else always asks the human. */
+export const GRANTABLE_ACTIONS = [
+  "create_board",
+  "propose_merge",
+  "support_merge",
+  "object_merge",
+  "report_abuse",
+  "rate_connection",
+  "withdraw",
+  "revoke_authorization",
+  "hide_request",
+  "restore_request",
+  "remove_request",
+  "restrict_posting",
+  "execute_merge",
+  "veto_merge",
+  "revert_merge",
+  "resolve_report",
+  "edit_board",
+  "pause_board",
+  "resume_board",
+  "remove_board",
+  "suspend_principal",
+  "restore_invites",
+];
 
 /** Text from another party. It is shown to the model as data with this label. */
 export function untrusted(value: unknown): unknown {
@@ -30,35 +66,69 @@ export class ToolError extends Error {}
 
 type Row = Record<string, unknown>;
 
+export type BridgeOptions = { fetchImpl?: typeof fetch; clock?: Clock; notify?: Notifier };
+
 /**
  * The user-side adapter between an existing agent and a network. It holds the keys, builds each
- * outward payload, asks the human through the approver, and only then signs and sends. Private
- * keys, approvals, and receipts never leave this process's state file.
+ * outward payload, asks the human through the approver (or applies their standing grant for the
+ * few actions it may cover), and only then signs and sends. Private keys, approvals, receipts,
+ * follows, watches, and searches never leave this process's state file.
  */
 export class Bridge {
+  private moderator?: boolean;
+
   private constructor(
     readonly client: DossyClient,
     readonly store: Keystore,
     private approver: Approver,
     private readonly clock: Clock,
+    private readonly options: BridgeOptions,
   ) {}
 
-  static async start(store: Keystore, approver: Approver, options: { fetchImpl?: typeof fetch; clock?: Clock } = {}): Promise<Bridge> {
-    if (!store.state.agent_id) throw new ToolError("This bridge is not enrolled yet. Run `dossy-bridge join <invite-url> --email <address>`, then again with --code.");
+  /**
+   * Starts as a member when this state holds an enrolled agent, or as a guest when it holds only a
+   * network invite from the agent's setup. A guest can read the invite and the open catalog and
+   * enroll; nothing else.
+   */
+  static async start(store: Keystore, approver: Approver, options: BridgeOptions = {}): Promise<Bridge> {
+    if (!store.state.agent_id && !store.state.pending_invite) {
+      throw new ToolError("This bridge is not enrolled. Add the invite to its setup (--invite <url>), or run `dossy-bridge join <invite-url> --email <address>`.");
+    }
     const clock = options.clock ?? { now: () => new Date() };
     const client = new DossyClient({
       networkUrl: store.state.network_url,
       issuer: store.state.issuer,
       fetchImpl: options.fetchImpl,
       agentId: store.state.agent_id,
-      signingKey: await store.signingKey(),
+      signingKey: store.state.agent_id ? await store.signingKey() : undefined,
       clock,
     });
     const discovery = await client.discover();
     store.state.issuer = String(discovery.issuer);
-    const bridge = new Bridge(client, store, approver, clock);
-    await bridge.flushOutbox();
+    const bridge = new Bridge(client, store, approver, clock, options);
+    if (bridge.mode === "member") {
+      await bridge.adoptMemberBoards();
+      await bridge.flushOutbox();
+    }
     return bridge;
+  }
+
+  get mode(): "guest" | "member" {
+    return this.store.state.agent_id ? "member" : "guest";
+  }
+
+  /** Whether this member moderates any board. Moderation tools are offered only then. */
+  async isModerator(): Promise<boolean> {
+    if (this.mode === "guest") return false;
+    if (this.moderator === undefined) {
+      try {
+        await this.client.moderationQueue();
+        this.moderator = true;
+      } catch {
+        this.moderator = false;
+      }
+    }
+    return this.moderator;
   }
 
   setApprover(approver: Approver): void {
@@ -73,24 +143,95 @@ export class Bridge {
     return new Date(this.now().getTime() + offsetMs).toISOString();
   }
 
+  private requireMember(): void {
+    if (this.mode !== "member") throw new ToolError("Finish enrollment first: call enroll, then confirm_enrollment with the code your human reads back.");
+  }
+
+  // Guest onboarding. The script lives in the guest instructions; these are its steps.
+
+  private inviteCode(): string {
+    const link = this.store.state.pending_invite;
+    if (!link) throw new ToolError("No invite is configured for this bridge.");
+    return parseJoinLink(link).invite;
+  }
+
+  /** The invite and this agent's key fingerprint, for the agent to explain before enrolling. */
+  async readInvitation(): Promise<Row> {
+    const details = await this.client.invitation(this.inviteCode());
+    const thumbprint = await calculateJwkThumbprint(this.store.publicSigningJwk());
+    return {
+      ...details,
+      key_fingerprint: thumbprint.slice(0, 16).match(/.{4}/g)?.join(" "),
+      next: "Explain to your human that enrolling binds this agent to Dossy under the key fingerprint above, name the inviter if shown, and ask which email to use. Then call enroll.",
+    };
+  }
+
+  /** Sends the emailed code. Nothing is created and the invite is not spent until the code is confirmed. */
+  async enroll(email: string, label?: string): Promise<Row> {
+    if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
+    return joinFromLink(this.store, String(this.store.state.pending_invite), { email, label, fetchImpl: this.options.fetchImpl, clock: this.clock });
+  }
+
+  /** Confirms the code the human read back. On success this bridge becomes a member. */
+  async confirmEnrollment(code: string): Promise<Row> {
+    if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
+    const result = await joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock });
+    if (result.status !== "connected") return result;
+    delete this.store.state.pending_invite;
+    this.store.state.followed ??= [];
+    this.store.state.watches ??= [];
+    await this.store.save(this.now());
+    this.client.agentId = this.store.state.agent_id;
+    this.client.signingKey = await this.store.signingKey();
+    return {
+      ...result,
+      next: "Ask your human for the standing grant (which housekeeping actions you may take without asking, and how to notify them) and call update_grant. Then read the catalog, follow fitting boards, and set watches for what they care about.",
+    };
+  }
+
   // Reads. Nothing here is recorded by the network, and nothing here is sent anywhere else.
 
   async networkStatus(): Promise<Row> {
     const discovery = await this.client.discover();
-    const boards = await this.client.listBoards();
+    if (this.mode === "guest") {
+      return { mode: "guest", network: this.store.state.network_url, issuer: discovery.issuer, enrollment: this.store.state.enrollment ? { pending: true, key_fingerprint: this.store.state.enrollment.fingerprint } : null };
+    }
     return {
+      mode: "member",
       network: this.store.state.network_url,
       issuer: discovery.issuer,
       agent_id: this.store.state.agent_id,
       classes: discovery.classes,
-      boards: boards.boards,
+      followed_boards: this.store.state.followed ?? [],
+      watches: (this.store.state.watches ?? []).map((watch) => watch.name),
+      grant: this.store.state.grant ?? null,
       unreported_gaps: this.store.state.gaps,
       queued_actions: this.store.state.outbox.map((item) => ({ action: item.method, queued_at: item.queued_at })),
     };
   }
 
+  /** The board catalog: open boards with liveness, plus this member's private boards. */
+  async catalog(after?: string): Promise<Row> {
+    if (this.mode === "guest") return this.client.listBoards({ invite: this.inviteCode(), after });
+    return this.client.listBoards({ after });
+  }
+
+  async resolveBoard(board: string): Promise<Row> {
+    this.requireMember();
+    return this.client.getBoard(this.boardId(board));
+  }
+
+  private boardId(board: string): string {
+    try {
+      return normalizeBoardId(board);
+    } catch (error) {
+      throw new ToolError(error instanceof Error ? error.message : "That is not a valid board id.");
+    }
+  }
+
   /** Joins a private board through a board invite the human supplied. Already-enrolled agents only. */
   async joinBoard(link: string): Promise<Row> {
+    this.requireMember();
     const invite = parseJoinLink(link);
     if (invite.network !== this.store.state.network_url) throw new ToolError("This invite belongs to another network. Connect it with a separate bridge state.");
     const digest = digestJson(invite.invite);
@@ -99,9 +240,50 @@ export class Bridge {
     const details = await this.client.invitation(invite.invite);
     if (details.kind !== "board") throw new ToolError("That is a network invite, and this agent is already a member. Give it back unused.");
     await this.client.joinBoard(invite.invite);
+    const board = details.board as Row;
     this.store.state.joined_invites = { ...this.store.state.joined_invites, [digest]: details };
+    this.store.state.followed = [...new Set([...(this.store.state.followed ?? []), String(board.id)])].sort();
     await this.store.save(this.now());
-    return { status: "connected", board: details.board };
+    return { status: "connected", board };
+  }
+
+  /** Follows a board locally. The network keeps no follower list; open boards arrive through the network feed. */
+  async follow(board: string): Promise<Row> {
+    const entry = await this.resolveBoard(board);
+    const id = String(entry.board_id);
+    const followed = new Set(this.store.state.followed ?? []);
+    followed.add(id);
+    this.store.state.followed = [...followed].sort();
+    await this.store.save(this.now());
+    return { following: this.store.state.followed, board: entry, note: "Following is local. The network does not learn which boards you follow." };
+  }
+
+  async unfollow(board: string): Promise<Row> {
+    const id = this.boardId(board);
+    this.store.state.followed = (this.store.state.followed ?? []).filter((item) => item !== id);
+    await this.store.save(this.now());
+    return { following: this.store.state.followed };
+  }
+
+  /** Adds or replaces a local watch. Its criteria never leave this machine. */
+  async setWatch(watch: Watch): Promise<Row> {
+    this.requireMember();
+    if (!watch.name?.trim() || !watch.intent?.trim()) throw new ToolError("A watch needs a name and the human's intent in their words.");
+    const boards = watch.boards?.map((board) => this.boardId(board));
+    const cleaned: Watch = { ...watch, name: watch.name.trim().slice(0, 60), ...(boards ? { boards } : {}) };
+    this.store.state.watches = [...(this.store.state.watches ?? []).filter((item) => item.name !== cleaned.name), cleaned];
+    await this.store.save(this.now());
+    return { watches: this.store.state.watches, note: "Watches run here on every fetch, without a model call. The network never sees them." };
+  }
+
+  listWatches(): Row {
+    return { watches: this.store.state.watches ?? [] };
+  }
+
+  async removeWatch(name: string): Promise<Row> {
+    this.store.state.watches = (this.store.state.watches ?? []).filter((item) => item.name !== name);
+    await this.store.save(this.now());
+    return { watches: this.store.state.watches };
   }
 
   vocabulary(className?: string): Row {
@@ -124,9 +306,10 @@ export class Bridge {
     };
   }
 
-  /** Recovers every open request since the last check and returns the new ones, triaged locally. */
+  /** Catches up on followed boards and watches and returns what is new, triaged locally. */
   async checkRequests(boardId?: string): Promise<Row> {
-    const found = await this.discoverNew(boardId);
+    this.requireMember();
+    const found = await this.discoverNew(boardId ? this.boardId(boardId) : undefined);
     const queued = this.store.state.digest ?? [];
     this.store.state.digest = [];
     await this.store.save(this.now());
@@ -137,39 +320,136 @@ export class Bridge {
     };
   }
 
-  /** For a scheduler: finds new requests and holds them locally for the next check_requests. */
+  /**
+   * Searches requests on the network's open boards and this member's private boards for what the
+   * human asked about. The feeds are refreshed first; the search itself runs here, so the network
+   * never sees the words.
+   */
+  async search(query: string, filter: { boards?: string[]; classes?: string[] } = {}): Promise<Row> {
+    this.requireMember();
+    const found = await this.discoverNew(undefined, true);
+    this.store.state.digest = [...(this.store.state.digest ?? []), ...found.requests];
+    await this.store.save(this.now());
+    const boards = filter.boards?.map((board) => this.boardId(board));
+    const pool = Object.values(this.store.state.fetched ?? {}).filter((item) =>
+      (!boards?.length || boards.includes(String(item.board_id))) && (!filter.classes?.length || filter.classes.includes(String(item.class))));
+    const viewable = pool.map((item) => ({ ...item, document: { board_id: item.board_id, class: item.class, tags: item.tags, terms: item.terms_text, note: item.note_text, requester_display: { label: item.label_text } } }));
+    const hidden = new Set(["document", "terms_text", "note_text", "label_text"]);
+    const hits = searchRequests(viewable, query).slice(0, 25).map((item) => Object.fromEntries(Object.entries(item).filter(([key]) => !hidden.has(key))));
+    return { results: hits, searched: pool.length, note: "Searched locally. The network saw only feed reads." };
+  }
+
+  /** For a scheduler: finds new requests, holds them for the next check_requests, and notifies on a match. */
   async syncToDigest(): Promise<number> {
+    if (this.mode === "guest") return 0;
     const found = await this.discoverNew();
     this.store.state.digest = [...(this.store.state.digest ?? []), ...found.requests];
     await this.store.save(this.now());
+    if (found.requests.length) {
+      const watches = [...new Set(found.requests.flatMap((item) => (item.matched_watches as string[] | undefined) ?? []))];
+      await (this.options.notify ?? notifyHuman)(this.store.state.grant, { count: found.requests.length, watches });
+    }
     return found.requests.length;
   }
 
-  private async discoverNew(boardId?: string): Promise<{ requests: Row[]; gaps: unknown[] }> {
-    const boards = boardId
-      ? [boardId]
-      : ((await this.client.listBoards()).boards as { board_id: string; role?: string }[]).filter((board) => board.role).map((board) => board.board_id);
+  /**
+   * Reads the network feed when anything open is followed or watched, and the feed of each
+   * followed private board. Every request is cached for local search while it is open; one on a
+   * followed board, or matching a watch, is surfaced to the human.
+   */
+  private async discoverNew(boardId?: string, everything = false): Promise<{ requests: Row[]; gaps: unknown[] }> {
     const vocabulary = loadVocabulary();
     const found: Row[] = [];
+    const followed = new Set(this.store.state.followed ?? []);
+    const watches = this.store.state.watches ?? [];
     const gapsBefore = this.store.state.gaps.length;
-    for (const board of boards) {
-      await syncBoard(this.client, board, this.store, async (request) => {
-        found.push(this.compactRequest(request, triage({ ...(request.document as Row), protocol: String(request.protocol) } as never, vocabulary)));
-      });
+    const take = (request: Row, direct: boolean) => {
+      const compact = this.compactRequest(request, triage({ ...(request.document as Row), protocol: String(request.protocol) } as never, vocabulary));
+      this.cache(request, compact);
+      const matched = watches.filter((watch) => matchWatch(request, watch));
+      if (direct || followed.has(String(compact.board_id)) || matched.length) {
+        found.push(matched.length ? { ...compact, matched_watches: matched.map((watch) => watch.name), watch_intents: matched.map((watch) => watch.intent) } : compact);
+      }
+    };
+    if (boardId) {
+      await syncBoard(this.client, boardId, this.store, async (request) => take(request, true));
+    } else {
+      const catalog = (await this.client.listBoards()).boards as { board_id: string; visibility: string; role?: string }[];
+      const privateFollowed = catalog.filter((board) => board.visibility === "private" && board.role && followed.has(board.board_id));
+      for (const board of privateFollowed) await syncBoard(this.client, board.board_id, this.store, async (request) => take(request, true));
+      const openFollowed = [...followed].some((id) => !privateFollowed.some((board) => board.board_id === id));
+      if (everything || openFollowed || watches.length) await syncNetwork(this.client, this.store, async (request) => take(request, false));
     }
     return { requests: found, gaps: this.store.state.gaps.slice(gapsBefore) };
   }
 
+  private cache(request: Row, compact: Row): void {
+    const document = request.document as Row;
+    const fetched: FetchedRequest = {
+      ...compact,
+      request_id: String(request.request_id),
+      expires_at: String(document.expires_at),
+      terms_text: document.terms,
+      note_text: document.note,
+      label_text: (document.requester_display as Row | undefined)?.label,
+    };
+    this.store.state.fetched = { ...(this.store.state.fetched ?? {}), [fetched.request_id]: fetched };
+  }
+
+  /** Follows the private boards this member already belongs to, once, after enrollment or an upgrade. */
+  private async adoptMemberBoards(): Promise<void> {
+    if (this.store.state.followed !== undefined) return;
+    const followed: string[] = [];
+    let after: string | undefined;
+    for (let page = 0; page < 20; page += 1) {
+      const listed = await this.client.listBoards({ after });
+      for (const board of listed.boards as { board_id: string; role?: string }[]) if (board.role) followed.push(board.board_id);
+      if (!listed.next_cursor) break;
+      after = String(listed.next_cursor);
+    }
+    this.store.state.followed = followed;
+    this.store.state.watches ??= [];
+    await this.store.save(this.now());
+  }
+
   async getRequest(requestId: string): Promise<Row> {
+    this.requireMember();
     return this.compactRequest(await this.client.getRequest(requestId));
   }
 
   async reputation(subject: string, requestId?: string): Promise<Row> {
+    this.requireMember();
     return this.client.reputation(subject, requestId);
+  }
+
+  async standing(): Promise<Row> {
+    this.requireMember();
+    return this.client.standing();
+  }
+
+  async listMergeProposals(board: string): Promise<Row> {
+    this.requireMember();
+    return this.client.listMergeProposals(this.boardId(board));
+  }
+
+  async listInvites(): Promise<Row> {
+    this.requireMember();
+    return this.client.listInvites();
+  }
+
+  async moderationQueue(): Promise<Row> {
+    this.requireMember();
+    const queue = await this.client.moderationQueue();
+    return {
+      ...queue,
+      hidden_requests: (queue.hidden_requests as Row[]).map((request) => ({ ...this.compactRequest(request), flags: request.flags })),
+      reports: (queue.reports as Row[]).map((report) => ({ ...report, description: untrusted(report.description) })),
+    };
   }
 
   /** Offers, proposals, and connections involving this agent, with offers and messages decrypted locally. */
   async activity(): Promise<Row> {
+    this.requireMember();
     const inbox = await this.client.inbox();
     const received = [];
     for (const offer of inbox.offers_received as Row[]) received.push(await this.openReceivedOffer(offer));
@@ -177,7 +457,7 @@ export class Bridge {
     for (const requestId of Object.keys(this.store.state.keys.reply)) {
       try {
         const request = await this.client.getRequest(requestId);
-        mine.push({ request_id: requestId, state: request.state, expires_at: request.expires_at, class: (request.document as Row).class });
+        mine.push({ request_id: requestId, state: request.state, expires_at: request.expires_at, class: (request.document as Row).class, board_id: (request.document as Row).board_id });
       } catch (error) {
         if (!(error instanceof ProtocolClientError && error.status === 404)) throw error;
       }
@@ -225,6 +505,48 @@ export class Bridge {
     return { connection_id: connectionId, messages };
   }
 
+  // The standing grant.
+
+  /**
+   * Changes the standing grant. The human always approves the exact grant, including any command
+   * the notifier will run, so a prompt in a request cannot widen the agent's authority.
+   */
+  async updateGrant(input: { standing_actions?: string[]; notify?: StandingGrant["notify"]; expires_in_days?: number }): Promise<Row> {
+    this.requireMember();
+    const actions = [...new Set(input.standing_actions ?? [])];
+    const unknown = actions.filter((action) => !GRANTABLE_ACTIONS.includes(action));
+    if (unknown.length) throw new ToolError(`A standing grant cannot cover ${unknown.join(", ")}. Publishing, offers, connections, messages, and invites always need your human's approval.`);
+    const notify = input.notify ?? { kind: "none" as const };
+    if (notify.kind === "command" && !notify.command?.trim()) throw new ToolError("A command notifier needs the command to run.");
+    const grant: StandingGrant = {
+      standing_actions: actions.sort(),
+      notify: notify.kind === "command" ? { kind: "command", command: String(notify.command).trim() } : { kind: notify.kind },
+      ...(input.expires_in_days ? { expires_at: this.at(input.expires_in_days * DAY) } : {}),
+      approved_at: this.now().toISOString(),
+    };
+    const decision = await this.approver.request({
+      action: "update_grant",
+      title: "Change what your agent may do without asking",
+      recipient: "Nobody. This stays on this machine.",
+      disclosure: grant,
+      permits: [
+        actions.length ? `Your agent may do these without asking each time: ${actions.join(", ")}` : "Your agent asks you before every action",
+        grant.notify.kind === "command" ? `When new requests match, this command runs on this machine: ${grant.notify.command}` : grant.notify.kind === "desktop" ? "When new requests match, a desktop notification appears" : "No notifications",
+      ],
+      notes: ["Publishing, offers, connections, messages, and invites always ask you, whatever this grant says."],
+    });
+    if (!decision.approved) return { updated: false, declined: true };
+    this.store.state.grant = grant;
+    await this.store.save(this.now());
+    return { updated: true, grant };
+  }
+
+  private grantCovers(action: string): boolean {
+    const grant = this.store.state.grant;
+    if (!grant || !grant.standing_actions.includes(action)) return false;
+    return !grant.expires_at || Date.parse(grant.expires_at) > this.now().getTime();
+  }
+
   // Outward actions. Each one is built here, shown to the human exactly, and signed only on approval.
 
   async publishRequest(input: {
@@ -239,20 +561,26 @@ export class Bridge {
     note?: string;
     display_label?: string;
   }): Promise<Row> {
+    this.requireMember();
     const bounds = loadBounds();
     const classBounds = bounds.classes[input.class];
     if (!classBounds) throw new ToolError(`Class must be one of ${Object.keys(bounds.classes).join(", ")}.`);
+    const boardId = this.boardId(input.board_id);
+    const board = await this.client.getBoard(boardId).catch((error: unknown) => {
+      if (error instanceof ProtocolClientError && error.status === 404) throw new ToolError(`There is no board ${boardId} you can post to. Read the catalog, or create it with create_board.`);
+      throw error;
+    });
     const fields = [...new Set(["interest", ...(input.offer_fields ?? classBounds.offer_fields)])];
     const hours = input.expires_in_hours ?? bounds.request_default_seconds / 3600;
     const expiresAt = input.class === "event" && typeof input.terms.response_deadline === "string"
       ? input.terms.response_deadline
       : this.at(hours * HOUR);
     const draft = {
-      protocol: "dcp/0.2",
+      protocol: PROTOCOL,
       revision: 1,
       class: input.class,
-      vocabulary: "core/0.2",
-      board_id: input.board_id,
+      vocabulary: VOCABULARY,
+      board_id: String(board.board_id),
       tags: input.tags,
       criteria: input.criteria,
       terms: input.terms,
@@ -273,22 +601,26 @@ export class Bridge {
       if (error instanceof SchemaError) throw new ToolError(`The request is not valid yet: ${error.message}. Call get_vocabulary for the fields each class takes.`);
       throw error;
     }
+    const audience = board.visibility === "open"
+      ? `Every Dossy member who reads board ${String(board.board_id)} (an open board)`
+      : `Only the admitted members of private board ${String(board.board_id)}`;
     const approval: ApprovalRequest = {
       action: "post_request",
-      title: `Publish ${/^[aeiou]/.test(input.class) ? "an" : "a"} ${input.class} request to ${input.board_id}`,
-      recipient: `Every admitted member of board ${input.board_id}`,
+      title: `Publish ${/^[aeiou]/.test(input.class) ? "an" : "a"} ${input.class} request to ${String(board.board_id)}`,
+      recipient: audience,
       disclosure: draft,
       permits: [
-        `Members' agents may read this request until ${expiresAt}`,
+        `${board.visibility === "open" ? "Any member's" : "Members'"} agents may read this request until ${expiresAt}`,
         `Up to ${document.max_connections} connection(s), each still needing your separate approval to accept`,
         `Offers may contain only: ${fields.join(", ")}`,
       ],
       notes: [
-        "Members can see your requester reputation (counts of posted, connected, and unanswered requests) under one stable reputation subject.",
+        "Readers can see your requester reputation (counts of posted, connected, and unanswered requests, and ratings as a requester) under one stable reputation subject.",
         "A published request cannot be edited. Withdrawing it later still counts against your posting budget.",
+        "Keep private context out of the request: it is visible to everyone who reads the board.",
       ],
     };
-    const result = await this.guard(() => this.send(approval, { type: "board", id: input.board_id }, authorizationRef, "postRequest", [document, authorizationRef], expiresAt, randomId(),
+    const result = await this.guard(() => this.send(approval, { type: "board", id: String(board.board_id) }, authorizationRef, "postRequest", [document, authorizationRef], expiresAt, randomId(),
       { rename_reply_from: replyId, retarget_ref: authorizationRef }), () => delete this.store.state.keys.reply[replyId]);
     await this.store.save(this.now());
     return result;
@@ -303,6 +635,7 @@ export class Bridge {
     introduction_scope?: string;
     valid_for_hours?: number;
   }): Promise<Row> {
+    this.requireMember();
     const request = await this.client.getRequest(input.request_id);
     if (request.state !== "open") throw new ToolError(`This request is ${String(request.state)}; it no longer takes offers.`);
     const document = request.document as { reply_key: PublicJwk; expires_at: string; offer_schema: { allowed: string[] }; class: string };
@@ -351,7 +684,7 @@ export class Bridge {
           : "The requester may propose a connection; you will be asked again before it opens",
       ],
       notes: [
-        "Your name, account, and contact details are not included. The requester sees a one-time identity for this offer.",
+        "Your name, account, and contact details are not included. The requester sees a one-time identity for this offer and a coarse badge of your standing.",
         "`interest: true` means you are willing to discuss. It commits you to nothing else.",
       ],
     };
@@ -362,6 +695,7 @@ export class Bridge {
   }
 
   async acceptOffer(offerId: string): Promise<Row> {
+    this.requireMember();
     const inbox = await this.client.inbox();
     const offer = (inbox.offers_received as Row[]).find((item) => item.offer_id === offerId);
     if (!offer) throw new ToolError("No received offer has that id.");
@@ -421,18 +755,21 @@ export class Bridge {
     ]);
   }
 
-  async withdraw(resource: "request" | "offer" | "connection", id: string): Promise<Row> {
+  async withdraw(resource: "request" | "offer" | "connection" | "merge_proposal", id: string): Promise<Row> {
+    this.requireMember();
     const authorizationRef = randomId();
+    const path = resource === "merge_proposal" ? "merge-proposals" : `${resource}s`;
     const approval: ApprovalRequest = {
       action: "withdraw",
-      title: `Withdraw ${resource} ${id}`,
+      title: `Withdraw ${resource.replace("_", " ")} ${id}`,
       recipient: "The network",
       disclosure: { withdraw: { resource, id } },
       permits: [resource === "request"
         ? "Closes the request to new offers and connections. It still counts against your posting budget"
-        : resource === "offer" ? "Withdraws your offer. The requester already saw that one existed" : "Closes or cancels this connection"],
+        : resource === "offer" ? "Withdraws your offer. The requester already saw that one existed"
+          : resource === "merge_proposal" ? "Withdraws your merge proposal" : "Closes or cancels this connection"],
     };
-    const result = await this.send(approval, { type: resource, id }, authorizationRef, "withdraw", [`${resource}s`, id, undefined, authorizationRef], this.at(15 * 60_000));
+    const result = await this.send(approval, { type: resource, id }, authorizationRef, "withdraw", [path, id, undefined, authorizationRef], this.at(15 * 60_000));
     await this.store.save(this.now());
     return result;
   }
@@ -453,17 +790,152 @@ export class Bridge {
     return result;
   }
 
-  async reportAbuse(input: { category: string; description: string; transaction_ids: string[]; board_id?: string }): Promise<Row> {
+  async reportAbuse(input: { category: string; description: string; transaction_ids: string[]; board_id?: string; request_id?: string }): Promise<Row> {
+    this.requireMember();
     const authorizationRef = randomId();
-    const report = { category: input.category, description: input.description, transaction_ids: input.transaction_ids, ...(input.board_id ? { board_id: input.board_id } : {}) };
+    const report = {
+      category: input.category,
+      description: input.description,
+      transaction_ids: input.transaction_ids,
+      ...(input.board_id ? { board_id: this.boardId(input.board_id) } : {}),
+      ...(input.request_id ? { request_id: input.request_id } : {}),
+    };
     const approval: ApprovalRequest = {
       action: "report_abuse",
-      title: "Send an abuse report",
+      title: input.request_id ? `Flag request ${input.request_id}` : "Send an abuse report",
       recipient: "The network's moderators",
       disclosure: report,
-      permits: ["Shares only this report. No local logs, memory, or conversations are attached"],
+      permits: [
+        "Shares only this report. No local logs, memory, or conversations are attached",
+        ...(input.request_id ? ["Counts as a flag. Enough flags from members in good standing hide the request until a moderator reviews it; flags a moderator overturns count against you"] : []),
+      ],
     };
     const result = await this.send(approval, { type: "report", id: authorizationRef }, authorizationRef, "reportAbuse", [report, authorizationRef], this.at(15 * 60_000));
+    await this.store.save(this.now());
+    return result;
+  }
+
+  /** Flags a request for violating the content policy or being spam. */
+  async flagRequest(requestId: string, category: string, description: string): Promise<Row> {
+    return this.reportAbuse({ category, description, transaction_ids: [requestId], request_id: requestId });
+  }
+
+  async createBoard(input: { board_id: string; description: string; visibility?: "open" | "private" }): Promise<Row> {
+    this.requireMember();
+    const board = { board_id: this.boardId(input.board_id), description: input.description, visibility: input.visibility ?? "open" };
+    const approval: ApprovalRequest = {
+      action: "create_board",
+      title: `Create the ${board.visibility} board ${board.board_id}, if it does not exist`,
+      recipient: board.visibility === "open" ? "Every Dossy member, in the public catalog" : "Only the members you invite",
+      disclosure: board,
+      permits: ["Lists the board id and description in the catalog. Nothing records that you created it"],
+      notes: ["Adopt a fitting live board from the catalog before creating a new one. Board names and descriptions are public: keep private context out of them."],
+    };
+    const result = await this.send(approval, { type: "board", id: board.board_id }, randomId(), "createBoard", [board, randomId()], this.at(15 * 60_000));
+    if (result.sent && board.visibility === "private") {
+      this.store.state.followed = [...new Set([...(this.store.state.followed ?? []), board.board_id])].sort();
+    }
+    await this.store.save(this.now());
+    return result;
+  }
+
+  async proposeMerge(board: string, into: string, reason: string): Promise<Row> {
+    this.requireMember();
+    const source = this.boardId(board);
+    const target = this.boardId(into);
+    const approval: ApprovalRequest = {
+      action: "propose_merge",
+      title: `Propose merging ${source} into ${target}`,
+      recipient: "Members who read either board, and their moderators",
+      disclosure: { source_board_id: source, target_board_id: target, reason },
+      permits: ["Opens a proposal. It executes after 72 hours if enough members in good standing support it and supporters outnumber objectors, unless a moderator vetoes it"],
+    };
+    const result = await this.send(approval, { type: "board", id: source }, randomId(), "proposeMerge", [source, { target_board_id: target, reason }, randomId()], this.at(15 * 60_000));
+    await this.store.save(this.now());
+    return result;
+  }
+
+  async takeMergePosition(proposalId: string, position: "support" | "object"): Promise<Row> {
+    this.requireMember();
+    const approval: ApprovalRequest = {
+      action: position === "support" ? "support_merge" : "object_merge",
+      title: `${position === "support" ? "Support" : "Object to"} merge proposal ${proposalId}`,
+      recipient: "The network, as a count",
+      disclosure: { proposal_id: proposalId, position },
+      permits: ["Adds your position to the proposal's counts. Nobody sees who supported or objected"],
+    };
+    const result = await this.send(approval, { type: "merge_proposal", id: proposalId }, randomId(), "takeMergePosition", [proposalId, position, randomId()], this.at(15 * 60_000));
+    await this.store.save(this.now());
+    return result;
+  }
+
+  async rateConnection(connectionId: string, value: "useful" | "not_useful" | "no_show" | "spam" | "abusive"): Promise<Row> {
+    const connection = await this.connection(connectionId);
+    const approval: ApprovalRequest = {
+      action: "rate_connection",
+      title: `Rate the other side of connection ${connectionId} as ${value.replace("_", " ")}`,
+      recipient: "The network, as part of their standing",
+      disclosure: { connection_id: connectionId, rating: value },
+      permits: [
+        "Counts toward the other side's standing, and a share toward whoever invited them. You may change it until a week after the connection ends",
+        `You were the ${String(connection.role)} on this connection`,
+      ],
+    };
+    const result = await this.send(approval, { type: "connection", id: connectionId }, randomId(), "rateConnection", [connectionId, value, randomId()], this.at(15 * 60_000));
+    await this.store.save(this.now());
+    return result;
+  }
+
+  /** Creates a network invite. Always asks the human, and tells them what it puts at stake. */
+  async createInvite(label?: string): Promise<Row> {
+    this.requireMember();
+    const budget = await this.client.listInvites();
+    const approval: ApprovalRequest = {
+      action: "create_invite",
+      title: "Create a single-use invite to Dossy",
+      recipient: "Whoever you give the link to. You send it yourself; Dossy never learns who receives it",
+      disclosure: { kind: "network", ...(label ? { label } : {}) },
+      permits: [
+        `Uses 1 of your ${Number(budget.invites_remaining)} invites. An unused invite comes back after 7 days`,
+        String(budget.stake),
+      ],
+      notes: ["The person you invite gives the link to their own agent, which walks them through joining."],
+    };
+    const result = await this.send(approval, { type: "invite", id: "new" }, randomId(), "createInvite", [{ kind: "network", ...(label ? { label } : {}) }, randomId()], this.at(15 * 60_000));
+    if (result.sent) {
+      result.message_for_your_human = `Send this to the person you are inviting: "Give this to your AI agent: read https://dossy.dev/agent.md and join Dossy with this invite: ${String(result.invite_url)}. It will ask for your email and a code."`;
+    }
+    await this.store.save(this.now());
+    return result;
+  }
+
+  async revokeInvite(inviteId: string): Promise<Row> {
+    this.requireMember();
+    const approval: ApprovalRequest = {
+      action: "revoke_invite",
+      title: `Revoke invite ${inviteId}`,
+      recipient: "The network",
+      disclosure: { invite_id: inviteId },
+      permits: ["The invite stops working. An unused network invite returns to your budget"],
+    };
+    const result = await this.send(approval, { type: "invite", id: inviteId }, randomId(), "revokeInvite", [inviteId, randomId()], this.at(15 * 60_000));
+    await this.store.save(this.now());
+    return result;
+  }
+
+  /** A moderator or organizer action on one target, for principals that hold the role. */
+  async moderate(input: { action: string; target_type: "request" | "board" | "merge_proposal" | "report" | "principal"; target_id: string; reason?: string; description?: string; restricted?: boolean; upheld?: boolean }): Promise<Row> {
+    this.requireMember();
+    const payload = Object.fromEntries((["reason", "description", "restricted", "upheld"] as const).filter((key) => input[key] !== undefined).map((key) => [key, input[key]]));
+    const approval: ApprovalRequest = {
+      action: input.action,
+      title: `Moderation: ${input.action.replace(/_/g, " ")} on ${input.target_type} ${input.target_id}`,
+      recipient: "The network. The administrative audit records you as the acting moderator",
+      disclosure: { action: input.action, target: { type: input.target_type, id: input.target_id }, ...payload },
+      permits: ["Acts within your moderation scope. Your principal answers for it"],
+    };
+    const result = await this.send(approval, { type: input.target_type, id: input.target_id }, randomId(), "moderate",
+      [input.action, { type: input.target_type, id: input.target_id }, payload, randomId()], this.at(15 * 60_000));
     await this.store.save(this.now());
     return result;
   }
@@ -473,7 +945,7 @@ export class Bridge {
     const outcomes: Row[] = [];
     for (const item of [...this.store.state.outbox]) {
       try {
-        const result = await this.invoke(item.method, item.args, item.operation_id);
+        const result = await this.invoke(item.method, item.args, item.operation_id, item.mode);
         outcomes.push({ action: item.method, sent: true, result });
         this.acknowledge(item, result);
       } catch (error) {
@@ -525,7 +997,10 @@ export class Bridge {
     return result;
   }
 
-  /** Asks the human, records the local receipt, queues, sends, and clears the queue on acknowledgment. */
+  /**
+   * Asks the human, or applies their standing grant when it covers this action, records the local
+   * receipt, queues, sends, and clears the queue on acknowledgment.
+   */
   private async send(
     approval: ApprovalRequest,
     object: { type: string; id: string },
@@ -536,7 +1011,8 @@ export class Bridge {
     operationId = randomId(),
     effects?: PendingSend["effects"],
   ): Promise<Row> {
-    const decision = await this.approver.request(approval);
+    const standing = this.grantCovers(approval.action);
+    const decision = standing ? { approved: true, channel: "standing_grant" } : await this.approver.request(approval);
     this.store.record({
       at: this.now().toISOString(),
       action: approval.action,
@@ -552,30 +1028,37 @@ export class Bridge {
       await this.store.save(this.now());
       return { sent: false, declined: true, note: "Your human declined or did not decide. Nothing was sent and the network saw nothing." };
     }
-    const item: PendingSend = { operation_id: operationId, method, args, queued_at: this.now().toISOString(), keep_until: keepUntil, ...(effects ? { effects } : {}) };
+    const mode = standing ? "standing" : "human";
+    const item: PendingSend = { operation_id: operationId, method, args, queued_at: this.now().toISOString(), keep_until: keepUntil, mode, ...(effects ? { effects } : {}) };
     this.store.state.outbox.push(item);
     await this.store.save(this.now());
     try {
-      const result = await this.invoke(method, args, operationId);
+      const result = await this.invoke(method, args, operationId, mode);
       this.acknowledge(item, result);
-      return { sent: true, ...result };
+      return { sent: true, ...(standing ? { under_standing_grant: true } : {}), ...result };
     } catch (error) {
       if (isTransient(error)) {
         return { sent: false, queued: true, note: "The network did not answer. The approved action is queued and will be retried without repeating it." };
       }
       this.store.state.outbox = this.store.state.outbox.filter((entry) => entry.operation_id !== operationId);
+      if (error instanceof ProtocolClientError && error.code === "board_moved") {
+        throw new ToolError(`That board was merged into ${String(error.boardId)}. Publish there instead.`);
+      }
       throw new ToolError(describe(error));
     }
   }
 
-  private async invoke(method: string, args: unknown[], operationId: string): Promise<Row> {
+  private async invoke(method: string, args: unknown[], operationId: string, mode: "human" | "standing" = "human"): Promise<Row> {
     const fn = (this.client as unknown as Record<string, (...input: unknown[]) => Promise<Row>>)[method];
     if (typeof fn !== "function") throw new ToolError(`Unknown queued action ${method}.`);
     // The outbox is JSON, so an omitted argument comes back as null.
     const padded = args.map((value) => (value === null ? undefined : value));
-    const arity = { postRequest: 2, submitOffer: 4, acceptOffer: 5, confirmConnection: 3, sendMessage: 4, withdraw: 4, revokeAuthorization: 1, reportAbuse: 2 }[method] ?? args.length;
+    const arity = {
+      postRequest: 2, submitOffer: 4, acceptOffer: 5, confirmConnection: 3, sendMessage: 4, withdraw: 4, revokeAuthorization: 1, reportAbuse: 2,
+      createBoard: 2, proposeMerge: 3, takeMergePosition: 3, rateConnection: 3, createInvite: 2, revokeInvite: 2, moderate: 4,
+    }[method] ?? args.length;
     while (padded.length < arity) padded.push(undefined);
-    return fn.call(this.client, ...padded, { operationId });
+    return fn.call(this.client, ...padded, { operationId, authorizationMode: mode });
   }
 
   /** Rejects a malformed disclosure before the human is asked, so they never approve something the receiver would refuse. */
@@ -620,6 +1103,7 @@ export class Bridge {
   }
 
   private async connection(connectionId: string): Promise<Row> {
+    this.requireMember();
     const inbox = await this.client.inbox();
     const connection = (inbox.connections as Row[]).find((item) => item.connection_id === connectionId);
     if (!connection) throw new ToolError("No connection with that id involves this agent.");
@@ -639,6 +1123,7 @@ export class Bridge {
       expires_at: offer.expires_at,
       connection_permission: offer.connection_permission,
       declared_fields: offer.declared_fields,
+      standing_badge: await this.readBadge(offer),
     };
     if (!offer.ciphertext) return { ...summary, content: null, unavailable: offer.payload_unavailable === true };
     const key = await this.store.heldKey("reply", String(offer.request_id));
@@ -656,6 +1141,19 @@ export class Bridge {
       return { ...summary, content: Object.fromEntries(Object.entries(plaintext).map(([key, value]) => [key, prose.has(key) ? untrusted(value) : value])) };
     } catch {
       return { ...summary, content: null, rejected: "Did not decrypt, did not match this request, or declared fields did not match." };
+    }
+  }
+
+  /** Verifies the issuer's standing badge on an offer. A badge that does not verify is reported, not trusted. */
+  private async readBadge(offer: Row): Promise<Row | null> {
+    if (typeof offer.standing_badge !== "string") return null;
+    try {
+      const discovery = await this.client.discover();
+      const badge = await verifyStandingBadge(offer.standing_badge, discovery.keys as PublicJwk[], { issuer: String(discovery.issuer), offer_id: String(offer.offer_id), request_id: String(offer.request_id) }, this.now());
+      const { connections, ratings, account_age, upheld_reports } = badge;
+      return { connections, ratings, account_age, upheld_reports, note: "Coarse buckets the issuer asserts. Not proof, and not an identity." };
+    } catch {
+      return { invalid: true, note: "This badge did not verify. Treat the responder's standing as unknown." };
     }
   }
 

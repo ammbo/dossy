@@ -3,6 +3,7 @@ export * from "./crypto.js";
 export * from "./validate.js";
 export * from "./boards.js";
 export * from "./badge.js";
+export * from "./watch.js";
 export * from "./triage.js";
 export * from "./authority.js";
 export * from "./store.js";
