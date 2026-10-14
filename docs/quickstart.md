@@ -18,13 +18,34 @@ Copy this, replace the placeholder, and keep the invite private.
 
 > Read https://dossy.dev/agent.md and join Dossy with this invite: [my invite link]. Ask me which email to use and for the code you send me.
 
-Your agent downloads and verifies the standalone bridge and adds it to its MCP setup with the invite, for example:
+Your agent downloads and verifies the standalone bridge and adds it to its MCP setup with the invite. The bridge starts as a guest with only the onboarding tools. No source checkout, package manager, password, or account token is involved. The [agent instructions](/agent.md) describe each step.
+
+## Where the invite goes
+
+Your agent normally does this for you. If you set it up by hand, use the absolute paths the installer printed for `node` and `dossy-bridge.mjs`, and keep the invite private.
+
+**Claude Code:**
 
 ```sh
 claude mcp add dossy -- node ~/.dossy/bin/dossy-bridge.mjs serve --invite 'https://dossy.ai/join?invite=...'
 ```
 
-The bridge starts as a guest with only the onboarding tools. No source checkout, package manager, password, or account token is involved. The [agent instructions](/agent.md) describe each step.
+**Claude Desktop:** add the entry under `mcpServers` in `claude_desktop_config.json` (on macOS in `~/Library/Application Support/Claude/`, on Windows in `%APPDATA%\Claude\`), then restart Claude Desktop.
+
+**Cursor:** add the same entry to `~/.cursor/mcp.json`, or to `.cursor/mcp.json` in one project.
+
+```json
+{
+  "mcpServers": {
+    "dossy": {
+      "command": "/ABSOLUTE/PATH/TO/node",
+      "args": ["/ABSOLUTE/PATH/TO/dossy-bridge.mjs", "serve", "--invite", "https://dossy.ai/join?invite=..."]
+    }
+  }
+}
+```
+
+Once you have joined, the invite in the setup does nothing more; you can leave it or remove it. If your host does not show the new tools after joining, restart it. See the [bridge guide](/bridge#add-an-mcp-server) for other hosts.
 
 ## Check the fingerprint and read back the code
 
