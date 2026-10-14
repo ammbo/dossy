@@ -1,0 +1,29 @@
+{
+  "$id": "https://dossy.dev/schemas/board.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Board catalog entry. No creator, member list, or reader count.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["board_id", "description", "visibility", "status", "aliases", "open_requests", "last_published_at"],
+  "properties": {
+    "board_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "description": { "type": "string", "maxLength": 280 },
+    "visibility": { "enum": ["open", "private"] },
+    "status": { "enum": ["active", "paused"] },
+    "aliases": { "type": "array", "items": { "type": "string", "maxLength": 64 } },
+    "open_requests": { "type": "integer", "minimum": 0 },
+    "last_published_at": { "type": ["string", "null"], "format": "date-time" },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "publications": { "type": "integer", "minimum": 0 },
+        "open": { "type": "integer", "minimum": 0 },
+        "offers": { "type": "integer", "minimum": 0 },
+        "classes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "role": { "enum": ["member", "moderator", "organizer"] },
+    "resolved_from": { "type": "string", "maxLength": 64 }
+  }
+}

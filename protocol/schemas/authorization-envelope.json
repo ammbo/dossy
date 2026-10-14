@@ -33,7 +33,8 @@
         "send_message",
         "withdraw",
         "revoke_authorization",
-        "report_abuse"
+        "report_abuse",
+        "create_board"
       ]
     },
     "target": {

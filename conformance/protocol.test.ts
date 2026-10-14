@@ -21,10 +21,13 @@ import {
   validateRequestDocument,
   verifyClaims,
   LocalAuthority,
+  normalizeBoardId,
 } from "@dossy/sdk";
 
 const hiring = JSON.parse(readFileSync(new URL("../protocol/vocabularies/fixtures/hiring-request.json", import.meta.url), "utf8"));
 const dating = JSON.parse(readFileSync(new URL("../protocol/vocabularies/fixtures/rejected-dating.json", import.meta.url), "utf8"));
+const general = JSON.parse(readFileSync(new URL("../protocol/vocabularies/fixtures/general-request.json", import.meta.url), "utf8"));
+const boardIds = JSON.parse(readFileSync(new URL("../protocol/vocabularies/fixtures/board-ids.json", import.meta.url), "utf8")) as { normalizes: { input: string; board_id: string }[]; rejects: string[] };
 const now = new Date("2026-10-07T12:00:00.000Z");
 
 describe("protocol fixtures", () => {
@@ -57,6 +60,19 @@ describe("protocol fixtures", () => {
       expires_at: "2026-10-14T18:00:00.000Z",
       escalation: ["identity_disclosure"],
     });
+  });
+
+  it("accepts a general request on any board id and bounds its ask", () => {
+    validateRequestDocument(general, loadBounds(), now);
+    expect(() => validateRequestDocument({ ...general, terms: { ask: "x".repeat(281) } }, loadBounds(), now)).toThrow(SchemaError);
+    expect(() => validateRequestDocument({ ...general, max_connections: 26 }, loadBounds(), now)).toThrow(SchemaError);
+    expect(() => validateRequestDocument({ ...general, offer_schema: { required: ["interest"], allowed: ["interest", "introduction_scope"] } }, loadBounds(), now)).toThrow(SchemaError);
+    expect(() => validateRequestDocument({ ...general, board_id: "Hiring.SF" }, loadBounds(), now)).toThrow(SchemaError);
+  });
+
+  it("normalizes board ids the same way everywhere", () => {
+    for (const item of boardIds.normalizes) expect(normalizeBoardId(item.input)).toBe(item.board_id);
+    for (const input of boardIds.rejects) expect(() => normalizeBoardId(input)).toThrow(SchemaError);
   });
 
   it("enforces the document and note bounds", () => {

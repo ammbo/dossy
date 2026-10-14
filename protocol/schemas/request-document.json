@@ -3,6 +3,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Immutable request document",
   "oneOf": [
+    { "$ref": "https://dossy.dev/schemas/request-general.json" },
     { "$ref": "https://dossy.dev/schemas/request-hiring.json" },
     { "$ref": "https://dossy.dev/schemas/request-introduction.json" },
     { "$ref": "https://dossy.dev/schemas/request-advice.json" },

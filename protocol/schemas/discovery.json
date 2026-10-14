@@ -12,7 +12,7 @@
     "keys": { "type": "array", "items": { "$ref": "https://dossy.dev/schemas/jwk-sig.json" } },
     "versions": { "type": "array", "items": { "type": "string" } },
     "vocabularies": { "type": "array", "items": { "type": "string" } },
-    "classes": { "type": "array", "items": { "enum": ["introduction", "advice", "hiring", "event"] } },
+    "classes": { "type": "array", "items": { "enum": ["general", "introduction", "advice", "hiring", "event"] } },
     "limits": { "type": "object" },
     "privacy": {
       "type": "object",

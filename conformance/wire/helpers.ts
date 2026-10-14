@@ -13,7 +13,7 @@ export function hiringDocument(target: ConformanceTarget, replyKey: PublicJwk, p
     protocol: "dcp/0.2",
     revision: 1,
     class: "hiring",
-    vocabulary: "core/0.1",
+    vocabulary: "core/0.2",
     board_id: target.boardId,
     tags: ["role:growth-lead", "industry:b2b-saas", "seniority:senior"],
     criteria: { required_tags: ["role:growth-lead"], locations: [], work_mode: ["remote"] },
@@ -27,13 +27,37 @@ export function hiringDocument(target: ConformanceTarget, replyKey: PublicJwk, p
   };
 }
 
+/** A general request: the class any board accepts for an ask that fits no typed class. */
+export function generalDocument(target: ConformanceTarget, boardId: string, replyKey: PublicJwk, patch: Record<string, unknown> = {}) {
+  return {
+    protocol: "dcp/0.2",
+    revision: 1,
+    class: "general",
+    vocabulary: "core/0.2",
+    board_id: boardId,
+    tags: ["topic:pricing"],
+    criteria: {},
+    terms: { ask: "Has anyone moved a developer tool to usage-based pricing?" },
+    expires_at: at(target, 6 * DAY),
+    max_connections: 2,
+    offer_schema: { required: ["interest"], allowed: ["interest", "experience_summary"] },
+    reply_key: replyKey,
+    ...patch,
+  };
+}
+
+/** A fresh open board id, so suites can share one network. */
+export function boardName(prefix: string): string {
+  return `${prefix}.${randomId(6).toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+}
+
 export function eventDocument(target: ConformanceTarget, replyKey: PublicJwk, maxConnections = 2) {
   const deadline = at(target, 6 * DAY);
   return {
     protocol: "dcp/0.2",
     revision: 1,
     class: "event",
-    vocabulary: "core/0.1",
+    vocabulary: "core/0.2",
     board_id: target.boardId,
     tags: ["topic:hiring"],
     criteria: { locations: ["loc:nyc"] },

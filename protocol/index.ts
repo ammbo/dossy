@@ -1,6 +1,8 @@
 // Machine-readable protocol data. Imported as modules so the SDK runs without filesystem access.
 import bounds from "./bounds.json" with { type: "json" };
-import coreVocabulary from "./vocabularies/core-0.1.json" with { type: "json" };
+import coreVocabulary from "./vocabularies/core-0.2.json" with { type: "json" };
+import board from "./schemas/board.json" with { type: "json" };
+import boardCreate from "./schemas/board-create.json" with { type: "json" };
 import authorizationEnvelope from "./schemas/authorization-envelope.json" with { type: "json" };
 import connectionAccept from "./schemas/connection-accept.json" with { type: "json" };
 import discovery from "./schemas/discovery.json" with { type: "json" };
@@ -19,6 +21,7 @@ import reputation from "./schemas/reputation.json" with { type: "json" };
 import requestAdvice from "./schemas/request-advice.json" with { type: "json" };
 import requestDocument from "./schemas/request-document.json" with { type: "json" };
 import requestEvent from "./schemas/request-event.json" with { type: "json" };
+import requestGeneral from "./schemas/request-general.json" with { type: "json" };
 import requestHiring from "./schemas/request-hiring.json" with { type: "json" };
 import requestIntroduction from "./schemas/request-introduction.json" with { type: "json" };
 import standingPermission from "./schemas/standing-permission.json" with { type: "json" };
@@ -29,6 +32,8 @@ export { bounds, coreVocabulary };
 /** Every JSON Schema in this protocol version, keyed by file name. */
 export const schemas: Record<string, { $id: string }> = {
   "authorization-envelope.json": authorizationEnvelope,
+  "board.json": board,
+  "board-create.json": boardCreate,
   "connection-accept.json": connectionAccept,
   "discovery.json": discovery,
   "display.json": display,
@@ -46,6 +51,7 @@ export const schemas: Record<string, { $id: string }> = {
   "request-advice.json": requestAdvice,
   "request-document.json": requestDocument,
   "request-event.json": requestEvent,
+  "request-general.json": requestGeneral,
   "request-hiring.json": requestHiring,
   "request-introduction.json": requestIntroduction,
   "standing-permission.json": standingPermission,

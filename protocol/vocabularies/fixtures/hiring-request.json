@@ -2,7 +2,7 @@
   "protocol": "dcp/0.2",
   "revision": 1,
   "class": "hiring",
-  "vocabulary": "core/0.1",
+  "vocabulary": "core/0.2",
   "board_id": "synthetic-startup",
   "tags": ["role:growth-lead", "industry:b2b-saas", "seniority:senior"],
   "criteria": {

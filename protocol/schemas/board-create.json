@@ -1,0 +1,13 @@
+{
+  "$id": "https://dossy.dev/schemas/board-create.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Create a board if it does not exist",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["board_id", "description", "visibility"],
+  "properties": {
+    "board_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*){0,3}$" },
+    "description": { "type": "string", "minLength": 1, "maxLength": 280 },
+    "visibility": { "enum": ["open", "private"] }
+  }
+}

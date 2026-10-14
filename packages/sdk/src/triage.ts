@@ -21,7 +21,7 @@ export type TriageResult =
   | { action: "private_evaluation"; unknownDescriptiveTags: string[] }
   | { action: "decline" };
 
-const CLASSES = new Set(["introduction", "advice", "hiring", "event"]);
+const CLASSES = new Set(["general", "introduction", "advice", "hiring", "event"]);
 
 export function triage(request: RequestView, vocabulary: Vocabulary, rules: LocalRules = {}): TriageResult {
   if (request.protocol !== PROTOCOL) return { action: "skip", reason: "unsupported_protocol" };

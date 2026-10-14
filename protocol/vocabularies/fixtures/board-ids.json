@@ -1,0 +1,12 @@
+{
+  "normalizes": [
+    { "input": "Hiring.SF ", "board_id": "hiring.sf" },
+    { "input": "hiring.sf", "board_id": "hiring.sf" },
+    { "input": "travel.New York City", "board_id": "travel.new-york-city" },
+    { "input": "climate_founders", "board_id": "climate-founders" },
+    { "input": "events..lisbon", "board_id": "events.lisbon" },
+    { "input": "-events.-lisbon-", "board_id": "events.lisbon" },
+    { "input": "a.b.c.d", "board_id": "a.b.c.d" }
+  ],
+  "rejects": ["", "...", "a.b.c.d.e", "hiring/sf", "émigrés", "board!"]
+}

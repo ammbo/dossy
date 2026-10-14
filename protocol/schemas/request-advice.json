@@ -8,8 +8,8 @@
     "protocol": { "const": "dcp/0.2" },
     "revision": { "const": 1 },
     "class": { "const": "advice" },
-    "vocabulary": { "const": "core/0.1" },
-    "board_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9-]+$" },
+    "vocabulary": { "const": "core/0.2" },
+    "board_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*){0,3}$" },
     "tags": { "$ref": "https://dossy.dev/schemas/tag-list.json" },
     "criteria": {
       "type": "object",

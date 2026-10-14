@@ -8,7 +8,7 @@ import { base64url } from "jose";
 // also runs in Deno, Bun, browsers, and edge runtimes.
 
 export const PROTOCOL = "dcp/0.2";
-export const VOCABULARY = "core/0.1";
+export const VOCABULARY = "core/0.2";
 export const DEFAULT_POLL_MS = 300_000;
 
 const encoder = new TextEncoder();
@@ -72,6 +72,9 @@ export type Bounds = {
   offer_max_seconds: number;
   feed_history_seconds: number;
   poll_default_seconds: number;
+  board_id_max_chars: number;
+  board_segments_max: number;
+  board_description_max_chars: number;
   classes: Record<string, ClassBounds>;
 };
 

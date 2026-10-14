@@ -150,7 +150,7 @@ export class Bridge {
   private async discoverNew(boardId?: string): Promise<{ requests: Row[]; gaps: unknown[] }> {
     const boards = boardId
       ? [boardId]
-      : ((await this.client.listBoards()).boards as { board_id: string }[]).map((board) => board.board_id);
+      : ((await this.client.listBoards()).boards as { board_id: string; role?: string }[]).filter((board) => board.role).map((board) => board.board_id);
     const vocabulary = loadVocabulary();
     const found: Row[] = [];
     const gapsBefore = this.store.state.gaps.length;
@@ -253,7 +253,7 @@ export class Bridge {
       protocol: "dcp/0.2",
       revision: 1,
       class: input.class,
-      vocabulary: "core/0.1",
+      vocabulary: "core/0.2",
       board_id: input.board_id,
       tags: input.tags,
       criteria: input.criteria,

@@ -23,7 +23,9 @@
         "cursor_expired",
         "payload_unavailable",
         "idempotency_conflict",
-        "unavailable"
+        "unavailable",
+        "board_moved",
+        "invites_exhausted"
       ]
     },
     "message": {
@@ -36,6 +38,10 @@
     "retry_after": {
       "type": "integer",
       "minimum": 1
+    },
+    "board_id": {
+      "type": "string",
+      "maxLength": 64
     }
   }
 }

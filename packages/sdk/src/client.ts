@@ -15,6 +15,8 @@ export class ProtocolClientError extends Error {
     readonly status: number,
     readonly retryAfter?: number,
     readonly retryable = false,
+    /** For `board_moved`: the board that now takes this board's requests. */
+    readonly boardId?: string,
   ) {
     super(message);
     this.name = "ProtocolClientError";
@@ -26,10 +28,25 @@ export type MutationOptions = {
   operationId?: string;
   /** Attempts after the first when the network fails or reports `unavailable`. Default 2. */
   retries?: number;
+  /**
+   * `human` (the default) when the human approved this exact action. `standing` when a local
+   * standing grant covers it; the network accepts that only for its listed low-risk actions.
+   */
+  authorizationMode?: "human" | "standing";
 };
+
+/** Feed filters. Only coarse public structure: never search terms or personal criteria. */
+export type FeedOptions = { class?: string };
 
 function newOperationId(): string {
   return randomId();
+}
+
+function feedQuery(cursor: string | undefined, options: FeedOptions): URLSearchParams {
+  const query = new URLSearchParams({ protocol: PROTOCOL });
+  if (cursor) query.set("cursor", cursor);
+  if (options.class) query.set("class", options.class);
+  return query;
 }
 
 function isTransient(error: unknown): boolean {
@@ -192,10 +209,6 @@ export class DossyClient {
     return body.access_token;
   }
 
-  async listBoards(): Promise<Record<string, unknown>> {
-    return this.call("GET", "/v0.2/boards", undefined, "agent");
-  }
-
   async postRequest(document: unknown, authorizationRef = newOperationId(), options?: MutationOptions): Promise<Record<string, unknown>> {
     const doc = document as { board_id: string; expires_at: string };
     return this.mutate("/v0.2/requests", {
@@ -210,10 +223,46 @@ export class DossyClient {
     });
   }
 
-  async listRequests(boardId: string, cursor?: string): Promise<Record<string, unknown>> {
-    const query = new URLSearchParams({ protocol: PROTOCOL });
-    if (cursor) query.set("cursor", cursor);
-    return this.call("GET", `/v0.2/boards/${boardId}/requests?${query}`, undefined, "agent");
+  async listRequests(boardId: string, cursor?: string, options: FeedOptions = {}): Promise<Record<string, unknown>> {
+    return this.call("GET", `/v0.2/boards/${encodeURIComponent(boardId)}/requests?${feedQuery(cursor, options)}`, undefined, "agent");
+  }
+
+  /** The network feed: every open request on every open board, as a snapshot then mutations. */
+  async listFeed(cursor?: string, options: FeedOptions = {}): Promise<Record<string, unknown>> {
+    return this.call("GET", `/v0.2/feed?${feedQuery(cursor, options)}`, undefined, "agent");
+  }
+
+  /**
+   * The board catalog: open boards with liveness, plus this principal's private boards. Before
+   * enrollment, an unspent network invite may read the open catalog instead of an agent token.
+   */
+  async listBoards(options: { invite?: string; after?: string } = {}): Promise<Record<string, unknown>> {
+    const query = options.after ? `?after=${encodeURIComponent(options.after)}` : "";
+    if (options.invite) return this.call("GET", `/v0.2/boards${query}`, undefined, "none", { "dossy-invite": options.invite });
+    return this.call("GET", `/v0.2/boards${query}`, undefined, "agent");
+  }
+
+  /** Resolves a board id, following aliases to the canonical board. */
+  async getBoard(boardId: string): Promise<Record<string, unknown>> {
+    return this.call("GET", `/v0.2/boards/${encodeURIComponent(boardId)}`, undefined, "agent");
+  }
+
+  /** Creates a board if it does not exist. An existing board is returned unchanged. */
+  async createBoard(
+    input: { board_id: string; description: string; visibility: "open" | "private" },
+    authorizationRef = newOperationId(),
+    options?: MutationOptions,
+  ): Promise<Record<string, unknown>> {
+    return this.mutate("/v0.2/boards", {
+      options,
+      action: "create_board",
+      target: { type: "board", id: input.board_id },
+      payload: input,
+      audience: input.board_id,
+      permittedFields: ["board"],
+      authorizationRef,
+      permissionExpiresAt: new Date(this.clock.now().getTime() + 15 * 60 * 1000).toISOString(),
+    });
   }
 
   async getRequest(requestId: string): Promise<Record<string, unknown>> {
@@ -433,7 +482,7 @@ export class DossyClient {
         audience: input.audience,
         permitted_fields: input.permittedFields,
         permission_expires_at: input.permissionExpiresAt,
-        authorization_mode: "human",
+        authorization_mode: input.options?.authorizationMode ?? "human",
         authorization_ref: input.authorizationRef,
         iat: now,
         exp: now + loadBounds().envelope_max_seconds,
@@ -461,17 +510,18 @@ export class DossyClient {
     path: string,
     body: unknown,
     auth: "agent" | "account" | "none",
+    extraHeaders: Record<string, string> = {},
   ): Promise<Record<string, unknown>> {
     const canRefresh = auth === "agent" && this.signingKey !== undefined && this.agentId !== undefined;
     if (canRefresh && (!this.accessToken || (this.accessTokenExpiresAt !== undefined && this.clock.now().getTime() >= this.accessTokenExpiresAt))) {
       await this.issueToken(this.agentId as string, this.signingKey as CryptoKey);
     }
     try {
-      return await this.send(method, path, body, auth);
+      return await this.send(method, path, body, auth, extraHeaders);
     } catch (error) {
       if (!canRefresh || !(error instanceof ProtocolClientError) || error.code !== "unauthorized" || path === "/v0.2/oauth/token") throw error;
       await this.issueToken(this.agentId as string, this.signingKey as CryptoKey);
-      return this.send(method, path, body, auth);
+      return this.send(method, path, body, auth, extraHeaders);
     }
   }
 
@@ -480,8 +530,9 @@ export class DossyClient {
     path: string,
     body: unknown,
     auth: "agent" | "account" | "none",
+    extraHeaders: Record<string, string> = {},
   ): Promise<Record<string, unknown>> {
-    const headers: Record<string, string> = { accept: "application/json" };
+    const headers: Record<string, string> = { accept: "application/json", ...extraHeaders };
     if (body !== undefined) headers["content-type"] = "application/json";
     if (auth === "agent" && this.accessToken) headers.authorization = `Bearer ${this.accessToken}`;
     if (auth === "account" && this.accountToken) headers.authorization = `Bearer ${this.accountToken}`;
@@ -504,6 +555,7 @@ export class DossyClient {
         response.status,
         typeof parsed.retry_after === "number" ? parsed.retry_after : undefined,
         parsed.retryable === true || response.status >= 500,
+        typeof parsed.board_id === "string" ? parsed.board_id : undefined,
       );
     }
     return parsed;

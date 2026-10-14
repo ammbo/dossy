@@ -1,6 +1,6 @@
 {
   "protocol": "dcp/0.1",
-  "vocabulary": "core/0.1",
+  "vocabulary": "core/0.2",
   "document_max_bytes": 8192,
   "note_max_chars": 512,
   "summary_max_chars": 280,
@@ -23,7 +23,20 @@
   "offer_max_seconds": 604800,
   "feed_history_seconds": 604800,
   "poll_default_seconds": 300,
+  "board_id_max_chars": 64,
+  "board_segments_max": 4,
+  "board_description_max_chars": 280,
   "classes": {
+    "general": {
+      "default_max_connections": 1,
+      "max_connections_cap": 25,
+      "offer_fields": [
+        "interest",
+        "experience_summary",
+        "skill_tags",
+        "available_from"
+      ]
+    },
     "introduction": {
       "default_max_connections": 1,
       "max_connections_cap": 1,
