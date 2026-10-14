@@ -8,6 +8,7 @@
     "reason": { "type": "string", "minLength": 1, "maxLength": 200 },
     "restricted": { "type": "boolean" },
     "description": { "type": "string", "minLength": 1, "maxLength": 280 },
-    "upheld": { "type": "boolean" }
+    "upheld": { "type": "boolean" },
+    "category": { "enum": ["spam", "abuse", "content_policy", "duplicate", "other"] }
   }
 }

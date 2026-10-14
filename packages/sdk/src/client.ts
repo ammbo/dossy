@@ -24,6 +24,8 @@ export class ProtocolClientError extends Error {
 }
 
 /** Options for a signed mutation. Reuse `operationId` to retry an action without repeating it. */
+export type ModerationCategory = "spam" | "abuse" | "content_policy" | "duplicate" | "other";
+
 export type MutationOptions = {
   operationId?: string;
   /** Attempts after the first when the network fails or reports `unavailable`. Default 2. */
@@ -499,11 +501,14 @@ export class DossyClient {
     return this.call("GET", "/v0.2/moderation/queue", undefined, "agent");
   }
 
-  /** A moderator or organizer action, such as hide_request or execute_merge, on one target. */
+  /**
+   * A moderator or organizer action, such as hide_request or execute_merge, on one target. Suspending
+   * a principal needs a category; only spam or abuse puts the inviter's invites at stake.
+   */
   async moderate(
     action: string,
     target: { type: "request" | "board" | "merge_proposal" | "report" | "principal"; id: string },
-    payload: { reason?: string; restricted?: boolean; description?: string; upheld?: boolean } = {},
+    payload: { category?: ModerationCategory; reason?: string; restricted?: boolean; description?: string; upheld?: boolean } = {},
     authorizationRef = newOperationId(),
     options?: MutationOptions,
   ): Promise<Record<string, unknown>> {

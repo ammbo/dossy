@@ -925,9 +925,9 @@ export class Bridge {
   }
 
   /** A moderator or organizer action on one target, for principals that hold the role. */
-  async moderate(input: { action: string; target_type: "request" | "board" | "merge_proposal" | "report" | "principal"; target_id: string; reason?: string; description?: string; restricted?: boolean; upheld?: boolean }): Promise<Row> {
+  async moderate(input: { action: string; target_type: "request" | "board" | "merge_proposal" | "report" | "principal"; target_id: string; category?: string; reason?: string; description?: string; restricted?: boolean; upheld?: boolean }): Promise<Row> {
     this.requireMember();
-    const payload = Object.fromEntries((["reason", "description", "restricted", "upheld"] as const).filter((key) => input[key] !== undefined).map((key) => [key, input[key]]));
+    const payload = Object.fromEntries((["category", "reason", "description", "restricted", "upheld"] as const).filter((key) => input[key] !== undefined).map((key) => [key, input[key]]));
     const approval: ApprovalRequest = {
       action: input.action,
       title: `Moderation: ${input.action.replace(/_/g, " ")} on ${input.target_type} ${input.target_id}`,

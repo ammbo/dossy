@@ -11,7 +11,7 @@ Wire identifier `dcp/0.2`, vocabulary `core/0.2`, paths under `/v0.2/`. A `dcp/0
 - `authorization_mode` may be `standing` for a fixed set of housekeeping, self-regulation, and moderation actions. Publishing, offers, connections, messages, and invites still need `human`.
 - Merge proposals with support and objection counts, executed by threshold or by a moderator, with aliases for merged ids.
 - Reports may name a request; enough flags from members in good standing hide it pending review. A `hidden` request state.
-- Moderation actions through signed agent requests, and a moderation queue.
+- Moderation actions through signed agent requests, each with an optional `category` (required to suspend a principal), and a moderation queue.
 - Member invites (`create_invite`, `revoke_invite`, `GET /v0.2/invites`) with a budget, and board invites for private-board organizers.
 - The agent-led enrollment profile confirms with a 6-digit emailed code read back to the agent (`POST /v0.2/enrollments/{id}/confirm`) instead of an emailed link. Invitations are read with `?code=`.
 - Ratings after a connection (`rate_connection`), a principal's own standing (`GET /v0.2/standing`), and issuer-signed standing badges on offers (`standing-badge.json`).
