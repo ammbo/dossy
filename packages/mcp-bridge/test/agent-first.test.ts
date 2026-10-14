@@ -55,7 +55,7 @@ suite("agent-first bridge", () => {
     const { bridge, store } = await guestBridge(target!, local(invite.invite_url));
     expect(bridge.mode).toBe("guest");
     const read = await bridge.readInvitation();
-    expect(read).toMatchObject({ kind: "network", inviter_label: "Ana", key_fingerprint: expect.stringMatching(/^\w{4} \w{4} \w{4} \w{4}$/) });
+    expect(read).toMatchObject({ kind: "network", inviter_label: "Ana", key_fingerprint: expect.stringMatching(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/) });
     await expect(bridge.catalog()).resolves.toMatchObject({ boards: expect.any(Array) });
     await expect(bridge.publishRequest({ board_id: "x", class: "general", tags: [], criteria: {}, terms: { ask: "?" } })).rejects.toThrow(/enrollment/);
     const email = `guest-${tag()}@example.test`;

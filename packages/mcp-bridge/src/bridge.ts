@@ -5,6 +5,7 @@ import {
   ProtocolClientError,
   SchemaError,
   digestJson,
+  keyFingerprint,
   loadBounds,
   loadVocabulary,
   matchWatch,
@@ -161,7 +162,7 @@ export class Bridge {
     const thumbprint = await calculateJwkThumbprint(this.store.publicSigningJwk());
     return {
       ...details,
-      key_fingerprint: thumbprint.slice(0, 16).match(/.{4}/g)?.join(" "),
+      key_fingerprint: keyFingerprint(thumbprint),
       next: "Explain to your human that enrolling binds this agent to Dossy under the key fingerprint above, name the inviter if shown, and ask which email to use. Then call enroll.",
     };
   }

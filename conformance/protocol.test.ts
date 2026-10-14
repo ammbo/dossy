@@ -10,6 +10,7 @@ import {
   encryptJson,
   generateEncryptionPair,
   generateSigningPair,
+  keyFingerprint,
   importSigningKey,
   loadBounds,
   loadVocabulary,
@@ -89,6 +90,11 @@ describe("protocol fixtures", () => {
     expect(() => validateRequestDocument(hiring, limits, now)).toThrow(/8 KiB|invalid/);
     expect(() => validateRequestDocument({ ...hiring, note: "too long for the tightened test limit" }, { ...loadBounds(), note_max_chars: 4 }, now)).toThrow(SchemaError);
     expect(canonicalByteLength(hiring)).toBeLessThan(8192);
+  });
+
+  it("formats key fingerprints as uppercase hex, whatever characters the thumbprint holds", () => {
+    expect(keyFingerprint("-_8AAP___wAA-_8AAP___wAA-_8AAP___wAA-_8AAP8")).toBe("FBFF 0000 FFFF FF00");
+    expect(keyFingerprint("NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs")).toMatch(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/);
   });
 
   it("digests RFC 8785 JSON independent of key order", () => {

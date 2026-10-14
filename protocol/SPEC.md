@@ -110,7 +110,7 @@ Membership comes through a member's invite. `create_invite` (`POST /v0.2/invites
 
 A network may advertise `endpoints.enrollments` so a person joins entirely through their agent.
 
-1. The agent generates a key in its runtime and sends `POST /v0.2/enrollments` with the network invite code, the human's email, the public key, and a label. The network checks the invite and key, and emails the human a 6-digit code with the agent label, the key fingerprint, and the inviter label. Nothing is created and the invite is not spent.
+1. The agent generates a key in its runtime and sends `POST /v0.2/enrollments` with the network invite code, the human's email, the public key, and a label. The network checks the invite and key, and emails the human a 6-digit code with the agent label, the key fingerprint, and the inviter label. Nothing is created and the invite is not spent. The key fingerprint is the first 8 bytes of the key's RFC 7638 thumbprint as four groups of uppercase hex, such as `3F2A 9C01 B7E4 5D88`, so the email and the agent show the same string.
 2. The agent shows the same fingerprint to the human and asks for the code. Consent to bind the key happens in that conversation. The code proves the human controls the mailbox. An agent reads the code from the inbox itself only when its human says to in that conversation.
 3. The agent sends `POST /v0.2/enrollments/{id}/confirm` with the code and `proof`, a JWS (ES256) by the enrolling key over `{ enrollment_id, aud: issuer, iat, exp, jti }` with a lifetime of at most 5 minutes. In one transaction the network creates the principal, records which member's invite admitted it, spends the invite, and registers the key. A repeated confirm returns the same agent.
 

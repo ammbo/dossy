@@ -1,4 +1,5 @@
 import {
+  base64url,
   CompactEncrypt,
   CompactSign,
   compactDecrypt,
@@ -60,6 +61,15 @@ export function assertPublicSigningKey(jwk: Record<string, unknown>): void {
   if ("d" in jwk) throw new Error("Signing key must be public.");
   if (jwk.kty !== "EC" || jwk.crv !== "P-256") throw new Error("Signing key must be P-256.");
   if (jwk.use === "enc") throw new Error("Encryption keys cannot sign actions.");
+}
+
+/**
+ * A key fingerprint people compare by eye or read aloud: the first 64 bits of the key's RFC 7638
+ * thumbprint as four groups of uppercase hex, such as `3F2A 9C01 B7E4 5D88`.
+ */
+export function keyFingerprint(thumbprint: string): string {
+  const hex = Array.from(base64url.decode(thumbprint).slice(0, 8), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return hex.toUpperCase().match(/.{4}/g)!.join(" ");
 }
 
 export async function importSigningKey(jwk: PublicJwk | JWK, extractable = false): Promise<CryptoKey> {
