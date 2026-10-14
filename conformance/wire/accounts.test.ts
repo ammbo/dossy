@@ -19,7 +19,7 @@ suite("discovery and credentials", () => {
 
   it("hides boards the principal was not admitted to", async () => {
     const party = await target!.enroll("isolation");
-    const boards = (await party.client.listBoards()).boards as { board_id: string }[];
+    const boards = (await party.client.listBoards()).private_boards as { board_id: string }[];
     expect(boards.map((board) => board.board_id)).toContain(target!.boardId);
     await expect(party.client.listRequests("pcn-conformance-not-admitted")).rejects.toMatchObject({ status: 404 });
   });

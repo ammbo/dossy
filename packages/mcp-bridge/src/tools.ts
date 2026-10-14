@@ -89,7 +89,7 @@ export const TOOLS: Tool[] = [
   {
     name: "list_boards",
     scope: "both",
-    description: "Read the board catalog: open boards with their description, open request count, and last publication, plus your human's private boards. Adopt a live board before creating one.",
+    description: "Read the board catalog. `boards` pages open boards (description, open request count, last publication). `private_boards` is your human's complete private list, separate from that page. Adopt a live board before creating one.",
     inputSchema: obj({ after: str("Continue from this board id, from next_cursor.") }),
     annotations: read,
     run: (bridge, args) => bridge.catalog(args.after as string | undefined),

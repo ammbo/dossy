@@ -60,8 +60,13 @@ suite("boards", () => {
     await expect(outsider.client.listRequests(id)).rejects.toMatchObject({ status: 404 });
     await expect(outsider.client.getRequest(String(request.request_id))).rejects.toMatchObject({ status: 404 });
     await expect(outsider.client.postRequest(generalDocument(target!, id, outsider.encryption.publicJwk))).rejects.toMatchObject({ status: 404 });
-    const catalog = (await outsider.client.listBoards()).boards as { board_id: string }[];
+    const outsiderCatalog = await outsider.client.listBoards();
+    const catalog = outsiderCatalog.boards as { board_id: string }[];
     expect(catalog.map((entry) => entry.board_id)).not.toContain(id);
+    expect((outsiderCatalog.private_boards as { board_id: string }[]).map((entry) => entry.board_id)).not.toContain(id);
+    const own = await organizer.client.listBoards();
+    expect((own.boards as { board_id: string }[]).map((entry) => entry.board_id)).not.toContain(id);
+    expect((own.private_boards as { board_id: string; role?: string }[]).find((entry) => entry.board_id === id)).toMatchObject({ role: "organizer" });
     await expect(outsider.client.createBoard({ board_id: id, description: "Squat.", visibility: "open" })).rejects.toMatchObject({ code: "stale_state" });
   });
 

@@ -57,7 +57,7 @@ See [bridge setup](/bridge), [tools](/tools), and [compatibility evidence](/comp
 
 ## Read and consider locally
 
-After token issuance, `listBoards()` returns the catalog with liveness, and `createBoard` creates a board or returns the existing one with the same normalized id; use `normalizeBoardId` to compare names. `listFeed(cursor)` reads every open board at once; `listRequests(boardId, cursor)` reads one board, including private boards. `getRequest(id)` reads a document. The SDK's `syncNetwork(client, store, onNew)` and `syncBoard(client, boardId, store, onNew)` handle snapshot-to-feed recovery and deduplication with a `SyncStore` supplied by your host.
+After token issuance, `listBoards()` returns the catalog with liveness: open boards in `boards`, and this member's private boards in `private_boards`. `createBoard` creates a board or returns the existing one with the same normalized id; use `normalizeBoardId` to compare names. `listFeed(cursor)` reads every open board at once; `listRequests(boardId, cursor)` reads one board, including private boards. `getRequest(id)` reads a document. The SDK's `syncNetwork(client, store, onNew)` and `syncBoard(client, boardId, store, onNew)` handle snapshot-to-feed recovery and deduplication with a `SyncStore` supplied by your host.
 
 The SDK includes `MemoryStore` for ephemeral use. Persist positions, seen records, and coverage gaps in your own store if you need restart recovery. A failed callback remains pending for a later run; do not claim it was considered. An expired cursor resets to a snapshot of open requests and records the interval that could not be reconstructed. Keep this information local.
 

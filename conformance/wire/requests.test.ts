@@ -17,7 +17,7 @@ suite("requests", () => {
 
   it("caps open requests, and a withdrawal does not refund the publication budget", async () => {
     const requester = await target!.enroll("budget");
-    const boards = (await requester.client.listBoards()).boards as { board_id: string; limits: { open: number; publications: number } }[];
+    const boards = (await requester.client.listBoards()).private_boards as { board_id: string; limits: { open: number; publications: number } }[];
     const board = boards.find((item) => item.board_id === target!.boardId)!;
     const limits = { open_requests: board.limits.open, publications_per_24h: board.limits.publications };
     const ids: string[] = [];

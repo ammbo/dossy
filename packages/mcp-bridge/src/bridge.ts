@@ -375,10 +375,11 @@ export class Bridge {
     if (boardId) {
       await syncBoard(this.client, boardId, this.store, async (request) => take(request, true));
     } else {
-      const catalog = (await this.client.listBoards()).boards as { board_id: string; visibility: string; role?: string }[];
-      const privateFollowed = catalog.filter((board) => board.visibility === "private" && board.role && followed.has(board.board_id));
-      for (const board of privateFollowed) await syncBoard(this.client, board.board_id, this.store, async (request) => take(request, true));
-      const openFollowed = [...followed].some((id) => !privateFollowed.some((board) => board.board_id === id));
+      const catalog = await this.client.listBoards();
+      const privateIds = new Set(((catalog.private_boards ?? []) as { board_id: string }[]).map((board) => board.board_id));
+      const privateFollowed = [...followed].filter((id) => privateIds.has(id));
+      for (const id of privateFollowed) await syncBoard(this.client, id, this.store, async (request) => take(request, true));
+      const openFollowed = [...followed].some((id) => !privateIds.has(id));
       if (everything || openFollowed || watches.length) await syncNetwork(this.client, this.store, async (request) => take(request, false));
     }
     return { requests: found, gaps: this.store.state.gaps.slice(gapsBefore) };
@@ -400,15 +401,8 @@ export class Bridge {
   /** Follows the private boards this member already belongs to, once, after enrollment or an upgrade. */
   private async adoptMemberBoards(): Promise<void> {
     if (this.store.state.followed !== undefined) return;
-    const followed: string[] = [];
-    let after: string | undefined;
-    for (let page = 0; page < 20; page += 1) {
-      const listed = await this.client.listBoards({ after });
-      for (const board of listed.boards as { board_id: string; role?: string }[]) if (board.role) followed.push(board.board_id);
-      if (!listed.next_cursor) break;
-      after = String(listed.next_cursor);
-    }
-    this.store.state.followed = followed;
+    const listed = await this.client.listBoards();
+    this.store.state.followed = ((listed.private_boards ?? []) as { board_id: string }[]).map((board) => board.board_id).sort();
     this.store.state.watches ??= [];
     await this.store.save(this.now());
   }

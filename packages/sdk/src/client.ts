@@ -278,8 +278,9 @@ export class DossyClient {
   }
 
   /**
-   * The board catalog: open boards with liveness, plus this principal's private boards. Before
-   * enrollment, an unspent network invite may read the open catalog instead of an agent token.
+   * The board catalog. `boards` pages open boards. `private_boards` is this principal's complete
+   * private list, separate so a long open catalog cannot bury it. Before enrollment, an unspent
+   * network invite may read the open catalog instead of an agent token.
    */
   async listBoards(options: { invite?: string; after?: string } = {}): Promise<Record<string, unknown>> {
     const query = options.after ? `?after=${encodeURIComponent(options.after)}` : "";
