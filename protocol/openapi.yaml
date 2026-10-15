@@ -132,7 +132,7 @@ paths:
   /v0.2/enrollments:
     post:
       operationId: enroll
-      description: Optional agent-led enrollment profile. Checks a network invite and key, then emails the human a 6-digit code with the agent label, key fingerprint, and inviter label. Nothing is created and the invite is not spent.
+      description: Optional agent-led enrollment profile. Checks a network invite and key, then emails the human. A client that lists `link` in confirmation_methods gets a single-use approval link in the email (never in this response) plus a 6-digit code, and the same answer whether or not the address already has an account; an existing account is connected instead of created, by link only. Otherwise the email carries the code with the key fingerprint, and an address with an account is refused with 409. Nothing is created and the invite is not spent.
       requestBody:
         required: true
         content:
@@ -145,13 +145,43 @@ paths:
                 contact_email: { type: string, format: email }
                 public_jwk: { $ref: "./schemas/jwk-sig.json" }
                 label: { type: string, maxLength: 80 }
+                confirmation_methods:
+                  type: array
+                  items: { type: string, enum: [link, code] }
+                  description: How this client can learn of approval. Omitted means code only.
       responses:
         "202":
-          description: Enrollment id, code_sent status, key fingerprint, inviter label, expiry, attempts allowed, and confirm endpoint. Persist the enrollment id and private key locally.
+          description: Enrollment id, code_sent status, key fingerprint, inviter label, expiry, attempts allowed, confirmation_methods, and confirm endpoint; with link, also poll_endpoint and interval. Persist the enrollment id and private key locally.
+        "409":
+          description: An account already uses this address, for a client that did not offer link.
+  /v0.2/enrollments/{id}/poll:
+    post:
+      operationId: poll_enrollment
+      description: Asks whether the human approved the emailed link, with the same proof as confirm. No faster than interval.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [proof]
+              properties:
+                proof: { type: string }
+      responses:
+        "200":
+          description: pending with interval, or connected with agent_id, and reputation_subject for a new member or existing_account true for an existing one
+        "401":
+          description: Proof not signed by the enrolling key
+        "403":
+          description: The human declined, or too many wrong answers
+        "410":
+          description: Enrollment expired; the invite is unspent
   /v0.2/enrollments/{id}/confirm:
     post:
       operationId: confirm_enrollment
-      description: Confirms with the code the human read back and a proof signed by the enrolling key over { enrollment_id, aud, iat, exp, jti }. Creates the principal, records the inviter, spends the invite, and registers the key in one transaction. A repeated confirm returns the same agent.
+      description: Confirms with the code the human read back and a proof signed by the enrolling key over { enrollment_id, aud, iat, exp, jti }. Creates the principal, records the inviter, spends the invite, and registers the key in one transaction. A repeated confirm, or one after the human approved the link, returns the same agent. A code never connects an existing account.
       parameters:
         - $ref: "#/components/parameters/Id"
       requestBody:
@@ -170,7 +200,9 @@ paths:
         "401":
           description: Wrong code or proof
         "403":
-          description: Too many attempts
+          description: Too many attempts, or the human declined
+        "409":
+          description: The address has an account; connect by link or pairing instead
         "410":
           description: Enrollment expired; the invite is unspent
   /v0.2/agents/recover:

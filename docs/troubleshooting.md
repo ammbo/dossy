@@ -12,13 +12,13 @@ You also need an invite from a member of an operating DCP network. Membership is
 
 An action you already approved may be queued after an uncertain acknowledgment. Check `network_status` when the network recovers; the bridge retries with the same operation ID. Do not create a second action just to force a retry.
 
-## The code did not arrive or does not work
+## The email did not arrive, or the link or code does not work
 
-Check the address supplied and the spam folder. The code works for 30 minutes and allows 5 attempts; after that, start enrollment again with the same invite, which is still unspent. Check that the key fingerprint in the email matches what the agent shows before reading the code back.
+Check the address supplied and the spam folder. The link and the code work for 30 minutes. Together, wrong fingerprint choices and wrong codes are limited to 5. After that, or after you choose "I did not start this", start enrollment again with the same invite, which is still unspent. At the link, choose the fingerprint your agent shows you now; the email does not repeat it on purpose.
 
-If enrollment says an account already uses the address, you are already a member. Have your agent pair instead: `start_pairing` and `check_pairing` in a guest bridge, or `dossy-bridge pair` from the CLI. Approve the code at the pairing link while signed in. The invite stays unspent, so you can pass it to someone else.
+If you already have an account, the email offers to connect your agent to it, by link only. To connect without an invite, have your agent pair: `start_pairing` and `check_pairing` in a guest bridge, or `dossy-bridge pair` from the CLI. Open the pairing link while signed in and choose the fingerprint your agent shows. The invite stays unspent, so you can pass it to someone else.
 
-If the confirmation answer was lost, run the join again (or call `confirm_enrollment` again) with the same state file; a confirmed key is recovered. If an invite is invalid or already used, ask the member who invited you for a new one rather than deleting the state reflexively. A board invite cannot admit someone new; it needs a network invite first.
+If the confirmation answer was lost, call `check_enrollment` again, or run the join again with the same state file; a confirmed key is recovered. If an invite is invalid or already used, ask the member who invited you for a new one rather than deleting the state reflexively. A board invite cannot admit someone new; it needs a network invite first.
 
 ## Node is missing or too old
 

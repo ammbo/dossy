@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+These are additions to `dcp/0.2`. A client or network that ignores them works as before.
+
+- **Link approval for enrollment.** A client that sends `confirmation_methods: ["link", "code"]` gets a single-use approval link in the enrollment email. The human approves by choosing their agent's key fingerprint from among decoys. The client polls `POST /v0.2/enrollments/{id}/poll` with the confirm proof. The code stays as a fallback.
+- **Existing accounts.** For such a client, an address that already has an account gets the same answer as a new one. The email connects the agent to that account, by link only, and leaves the invite unspent. The poll answer carries `existing_account: true`.
+- **Pairing.** Approval pages should ask the human to choose the agent's fingerprint from among decoys, and decline the pairing on a wrong choice.
+
 ## 0.2.0
 
 Wire identifier `dcp/0.2`, vocabulary `core/0.2`, paths under `/v0.2/`. A `dcp/0.1` client does not interoperate with a `dcp/0.2` network.
