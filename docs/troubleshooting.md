@@ -76,7 +76,7 @@ Requests expire between one hour and 30 days after publication. An event's respo
 
 ## A connection will not open
 
-The offer or its permission may have expired, capacity may be full, or the responder may still need to confirm. A confirmation proposal lasts at most 15 minutes and can end sooner. Use `list_activity` to inspect state; fetch fresh state after `stale_state` rather than reusing an old acceptance.
+The offer or its permission may have expired, capacity may be full, or the responder may still need to confirm. A confirmation proposal lasts 15 minutes unless the requester's agent chose another window (up to 24 hours), and ends sooner if the request or offer expires. Use `list_activity` to inspect state; fetch fresh state after `stale_state` rather than reusing an old acceptance.
 
 Connections allow two clarifications and one handoff per side within 24 hours. A closed or expired channel cannot accept more messages. Establish a human conversation during the available window.
 

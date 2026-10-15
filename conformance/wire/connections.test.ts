@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { generateEncryptionPair, randomId, type PcnHeader } from "@dossy/sdk";
 import { loadTarget } from "../target.js";
-import { accept, eventDocument, hiringDocument, lifetime, submitInterest } from "./helpers.js";
+import { accept, digestOf, eventDocument, hiringDocument, lifetime, submitInterest } from "./helpers.js";
 
 const target = await loadTarget();
 const suite = target ? describe : describe.skip;
@@ -51,6 +51,17 @@ suite("connections", () => {
     const listed = (await requester.client.listMessages(String(confirmed.connection_id))).messages as { ciphertext: string }[];
     const opened = await requester.client.openMessage(messageKey.privateKey, listed[0]!.ciphertext, binding);
     expect(opened).toEqual({ display_name: "Responder", scheduling_url: "https://example.test/book" });
+  });
+
+  it("lets the requester set the confirmation window and accept under standing authority", async () => {
+    const requester = await target!.enroll("window-requester");
+    const responder = await target!.enroll("window-responder");
+    const request = await requester.client.postRequest(hiringDocument(target!, requester.encryption.publicJwk));
+    const { offer } = await submitInterest(target!, responder, request, "confirm_required");
+    const payload = { requester_message_key: requester.encryption.publicJwk, confirm_within_seconds: 3600 };
+    const proposed = await requester.client.acceptOffer(String(offer.offer_id), payload, randomId(), Number(offer.state_version), digestOf(offer), { authorizationMode: "standing" });
+    expect(proposed.state).toBe("pending_confirmation");
+    expect(Math.abs(Date.parse(String(proposed.confirm_by)) - (target!.clock.now().getTime() + 3600_000))).toBeLessThan(60_000);
   });
 
   it("lets only one of two concurrent acceptances take the last slot", async () => {

@@ -41,10 +41,10 @@ npx -y @dossyai/mcp-bridge@0.3.1 call publish_request --json '{"board_id":"prici
 To express interest in a real request that accepts `experience_summary`:
 
 ```sh
-npx -y @dossyai/mcp-bridge@0.3.1 call offer_interest --json '{"request_id":"REPLACE_WITH_REQUEST_ID","allow_connection":false,"experience_summary":"I led a usage-based pricing rollout and am happy to discuss lessons learned."}'
+npx -y @dossyai/mcp-bridge@0.3.1 call offer_interest --json '{"request_id":"REPLACE_WITH_REQUEST_ID","experience_summary":"I led a usage-based pricing rollout and am happy to discuss lessons learned."}'
 ```
 
-Setting `allow_connection` to `false` means the responder must approve the eventual connection as well as the offer. The agent must obtain authorization for this exact offer before calling the tool; default mode adds no second prompt.
+By default the requester may then connect without asking the responder again. Add `"allow_connection":false` if the responder wants to confirm the connection separately. The agent must obtain authorization for this exact offer before calling the tool; default mode adds no second prompt.
 
 ### Complete the exchange
 
@@ -57,7 +57,7 @@ npx -y @dossyai/mcp-bridge@0.3.1 call list_activity
 npx -y @dossyai/mcp-bridge@0.3.1 call accept_offer --json '{"offer_id":"REPLACE_WITH_OFFER_ID"}'
 ```
 
-If the offer used `allow_connection: false`, the responder confirms the pending connection before its deadline. If it was preauthorized, skip this confirmation:
+If the offer used `allow_connection: false`, the responder confirms the pending connection before its deadline (15 minutes unless `accept_offer` set `confirm_within_minutes`). Otherwise skip this confirmation:
 
 ```sh
 npx -y @dossyai/mcp-bridge@0.3.1 call list_activity

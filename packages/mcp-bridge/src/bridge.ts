@@ -738,7 +738,8 @@ export class Bridge {
     for (const requestId of Object.keys(this.store.state.keys.reply)) {
       try {
         const request = await this.client.getRequest(requestId);
-        mine.push({ request_id: requestId, state: request.state, expires_at: request.expires_at, class: (request.document as Row).class, board_id: (request.document as Row).board_id });
+        const screening = this.screeningFor(requestId);
+        mine.push({ request_id: requestId, state: request.state, expires_at: request.expires_at, class: (request.document as Row).class, board_id: (request.document as Row).board_id, ...(screening ? { screening } : {}) });
       } catch (error) {
         if (!(error instanceof ProtocolClientError && error.status === 404)) throw error;
       }
@@ -823,6 +824,12 @@ export class Bridge {
     return { updated: true, grant };
   }
 
+  /** Screening rules the human approved with one of their requests, while that request lasts. */
+  private screeningFor(requestId: string): string | undefined {
+    const held = this.store.state.screening?.[requestId];
+    return held && Date.parse(held.expires_at) > this.now().getTime() ? held.rules : undefined;
+  }
+
   private grantCovers(action: string): boolean {
     const grant = this.store.state.grant;
     if (!grant || !grant.standing_actions.includes(action)) return false;
@@ -842,8 +849,11 @@ export class Bridge {
     offer_fields?: string[];
     note?: string;
     display_label?: string;
+    screening?: string;
   }): Promise<Row> {
     this.requireMember();
+    const screening = input.screening?.trim() || undefined;
+    if (screening && screening.length > 1000) throw new ToolError("Screening rules must be at most 1000 characters.");
     const bounds = loadBounds();
     const classBounds = bounds.classes[input.class];
     if (!classBounds) throw new ToolError(`Class must be one of ${Object.keys(bounds.classes).join(", ")}.`);
@@ -893,24 +903,28 @@ export class Bridge {
       disclosure: draft,
       permits: [
         `${board.visibility === "open" ? "Any member's" : "Members'"} agents may read this request until ${expiresAt}`,
-        `Up to ${document.max_connections} connection(s), each still needing your separate approval to accept`,
+        screening
+          ? `Up to ${document.max_connections} connection(s). Your agent may accept offers that meet your screening rules without asking you again; making an introduction still asks`
+          : `Up to ${document.max_connections} connection(s), each still needing your separate approval to accept`,
         `Offers may contain only: ${fields.join(", ")}`,
       ],
       notes: [
         "Readers can see your requester reputation (counts of posted, connected, and unanswered requests, and ratings as a requester) under one stable reputation subject.",
         "A published request cannot be edited. Withdrawing it later still counts against your posting budget.",
         "Keep private context out of the request: it is visible to everyone who reads the board.",
+        ...(screening ? [`Your screening rules stay on this machine and are never sent: ${screening}`] : []),
       ],
     };
     const result = await this.guard(() => this.send(approval, { type: "board", id: String(board.board_id) }, authorizationRef, "postRequest", [document, authorizationRef], expiresAt, randomId(),
-      { rename_reply_from: replyId, retarget_ref: authorizationRef }), () => delete this.store.state.keys.reply[replyId]);
+      { rename_reply_from: replyId, retarget_ref: authorizationRef, ...(screening ? { screening } : {}) }), () => delete this.store.state.keys.reply[replyId]);
     await this.store.save(this.now());
     return result;
   }
 
   async offerInterest(input: {
     request_id: string;
-    allow_connection: boolean;
+    /** Defaults to true: asking for connections implies the requester may open one. */
+    allow_connection?: boolean;
     available_from?: string;
     skill_tags?: string[];
     experience_summary?: string;
@@ -918,6 +932,7 @@ export class Bridge {
     valid_for_hours?: number;
   }): Promise<Row> {
     this.requireMember();
+    const allowConnection = input.allow_connection ?? true;
     const request = await this.client.getRequest(input.request_id);
     if (request.state !== "open") throw new ToolError(`This request is ${String(request.state)}; it no longer takes offers.`);
     const document = request.document as { reply_key: PublicJwk; expires_at: string; offer_schema: { allowed: string[] }; class: string };
@@ -949,7 +964,7 @@ export class Bridge {
       request_digest: String(request.document_digest),
       expires_at: expiresAt,
       declared_fields: Object.keys(plaintext),
-      connection_permission: input.allow_connection ? "preauthorized" : "confirm_required",
+      connection_permission: allowConnection ? "preauthorized" : "confirm_required",
       permission_expires_at: expiresAt,
       responder_key: responderKey,
       ciphertext,
@@ -961,7 +976,7 @@ export class Bridge {
       disclosure: plaintext,
       permits: [
         `The requester can read this offer until ${expiresAt}`,
-        input.allow_connection
+        allowConnection
           ? "The requester may open a bounded connection with you without asking again (still no identity or contact sharing)"
           : "The requester may propose a connection; you will be asked again before it opens",
       ],
@@ -976,24 +991,29 @@ export class Bridge {
     return result;
   }
 
-  async acceptOffer(offerId: string): Promise<Row> {
+  async acceptOffer(offerId: string, confirmWithinMinutes?: number): Promise<Row> {
     // Acceptances share an offer-key slot. Serialize just this offer, including its approval,
     // so a second session cannot replace the key of a queued or established connection.
     return withStateTask(this.store.path, `accept-${digestJson(offerId)}`, async () => {
       await this.refresh();
       const pending = this.store.state.outbox.find(item => item.method === "acceptOffer" && item.args[0] === offerId && Date.parse(item.keep_until) > this.now().getTime());
       if (pending) return { sent: false, queued: true, note: "Acceptance of this offer is already approved and queued. Its original key and operation ID will be reused." };
-      return this.acceptOfferLocked(offerId);
+      return this.acceptOfferLocked(offerId, confirmWithinMinutes);
     });
   }
 
-  private async acceptOfferLocked(offerId: string): Promise<Row> {
+  private async acceptOfferLocked(offerId: string, confirmWithinMinutes?: number): Promise<Row> {
     this.requireMember();
+    const { confirmation_seconds: defaultSeconds, confirmation_max_seconds: maxSeconds } = loadBounds();
+    if (confirmWithinMinutes !== undefined && (!Number.isInteger(confirmWithinMinutes) || confirmWithinMinutes < 1 || confirmWithinMinutes * 60 > maxSeconds)) {
+      throw new ToolError(`confirm_within_minutes must be a whole number from 1 to ${maxSeconds / 60}.`);
+    }
     const inbox = await this.client.inbox();
     const offer = (inbox.offers_received as Row[]).find((item) => item.offer_id === offerId);
     if (!offer) throw new ToolError("No received offer has that id.");
     if (offer.state !== "active") throw new ToolError(`This offer is ${String(offer.state)}.`);
     const opened = await this.openReceivedOffer(offer);
+    const screening = this.screeningFor(String(offer.request_id));
     const authorizationRef = randomId();
     const messageKey = await this.store.newKey("accept", offerId, this.at(3 * DAY));
     const approval: ApprovalRequest = {
@@ -1004,13 +1024,16 @@ export class Bridge {
       permits: [
         offer.connection_permission === "preauthorized"
           ? "Opens a connection now. Each side may then send 2 clarifications and 1 handoff within 24 hours"
-          : "Proposes a connection. The responder must confirm within 15 minutes",
+          : `Proposes a connection. The responder must confirm within ${confirmWithinMinutes ?? defaultSeconds / 60} minutes`,
       ],
-      notes: ["Accepting shares no identity or contact details. Sending a handoff is a separate approval."],
+      notes: [
+        "Accepting shares no identity or contact details. Sending a handoff is a separate approval.",
+        ...(screening ? [`Covered by the screening rules you approved with this request: ${screening}`] : []),
+      ],
     };
     const result = await this.guard(() => this.send(approval, { type: "offer", id: offerId }, authorizationRef, "acceptOffer",
-      [offerId, { requester_message_key: messageKey }, authorizationRef, Number(offer.state_version), String((offer.authorization as Row).payload_digest)], this.at(15 * 60_000), randomId(),
-      { retarget_ref: authorizationRef }), () => delete this.store.state.keys.accept[offerId]);
+      [offerId, { requester_message_key: messageKey, ...(confirmWithinMinutes ? { confirm_within_seconds: confirmWithinMinutes * 60 } : {}) }, authorizationRef, Number(offer.state_version), String((offer.authorization as Row).payload_digest)], this.at(15 * 60_000), randomId(),
+      { retarget_ref: authorizationRef }, screening !== undefined), () => delete this.store.state.keys.accept[offerId]);
     await this.store.save(this.now());
     return result;
   }
@@ -1318,8 +1341,9 @@ export class Bridge {
   }
 
   /**
-   * Asks the human, or applies their standing grant when it covers this action, records the local
-   * receipt, queues, sends, and clears the queue on acknowledgment.
+   * Asks the human, or applies their standing grant when it covers this action (or the caller's
+   * request-scoped screening rules do), records the local receipt, queues, sends, and clears the
+   * queue on acknowledgment.
    */
   private async send(
     approval: ApprovalRequest,
@@ -1330,9 +1354,10 @@ export class Bridge {
     keepUntil: string,
     operationId = randomId(),
     effects?: PendingSend["effects"],
+    covered = false,
   ): Promise<Row> {
     await this.refresh();
-    const standing = this.grantCovers(approval.action);
+    const standing = covered || this.grantCovers(approval.action);
     const decision = standing ? { approved: true, channel: "standing_grant" } : await this.approver.request(approval);
     this.store.record({
       at: this.now().toISOString(),
@@ -1391,6 +1416,9 @@ export class Bridge {
       const held = this.store.state.keys.reply[from];
       delete this.store.state.keys.reply[from];
       if (held) this.store.state.keys.reply[created.id] = held;
+    }
+    if (item.effects?.screening && created?.type === "request") {
+      this.store.state.screening = { ...this.store.state.screening, [created.id]: { rules: item.effects.screening, expires_at: String((item.args[0] as Row).expires_at) } };
     }
     const ref = item.effects?.retarget_ref;
     if (ref && created) {

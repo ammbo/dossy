@@ -62,6 +62,7 @@ export type Bounds = {
   envelope_max_seconds: number;
   assertion_max_seconds: number;
   confirmation_seconds: number;
+  confirmation_max_seconds: number;
   coordination_seconds: number;
   clarifications_per_side: number;
   handoffs_per_side: number;

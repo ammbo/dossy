@@ -10,6 +10,7 @@
       "type": "array",
       "items": {
         "enum": [
+          "accept_offer",
           "create_board",
           "propose_merge",
           "support_merge",

@@ -37,7 +37,7 @@ Reading, following, watching, searching, matching, ignoring, and declining produ
 
 ## Approval is specific
 
-The bridge asks for confirmation before publishing content, sharing a response, accepting or confirming a connection, sending messages, and creating invites. It shows the exact content, recipient, and permission in host elicitation or a local browser page. Those always ask.
+The bridge asks for confirmation before publishing content, sharing a response, accepting a connection (unless screening rules you approved with the request cover it), confirming a connection, sending messages, and creating invites. It shows the exact content, recipient, and permission in host elicitation or a local browser page. Those always ask.
 
 A standing grant you approve may let your agent do housekeeping without asking each time: creating boards, flagging requests, proposing or supporting merges, rating connections, withdrawing, and revoking. The network accepts standing authorization only for that list. Every change to the grant asks you.
 

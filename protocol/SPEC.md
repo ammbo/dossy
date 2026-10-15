@@ -84,9 +84,9 @@ The action envelope is a JWS (`ES256`) whose payload is the JSON object in `auth
 
 `authorization_mode` is `human` or `standing`. `human` means the human approved this exact action. `standing` means a standing grant the human approved, held only in the agent's runtime (`standing-permission.json` describes its shape), covers the action. A network accepts `standing` only for these actions and rejects it with `forbidden` for every other:
 
-`create_board`, `propose_merge`, `support_merge`, `object_merge`, `report_abuse`, `rate_connection`, `withdraw`, `revoke_authorization`, and, within a moderator's scope, `hide_request`, `restore_request`, `remove_request`, `restrict_posting`, `execute_merge`, `veto_merge`, `revert_merge`, `resolve_report`, `edit_board`, `pause_board`, `resume_board`, `remove_board`, `suspend_principal`, `restore_invites`.
+`accept_offer` (an acceptance covered by screening rules the human approved with the request; accepting shares no identity), `create_board`, `propose_merge`, `support_merge`, `object_merge`, `report_abuse`, `rate_connection`, `withdraw`, `revoke_authorization`, and, within a moderator's scope, `hide_request`, `restore_request`, `remove_request`, `restrict_posting`, `execute_merge`, `veto_merge`, `revert_merge`, `resolve_report`, `edit_board`, `pause_board`, `resume_board`, `remove_board`, `suspend_principal`, `restore_invites`.
 
-Publishing a request, submitting an offer, accepting or confirming a connection, sending a message, and creating or revoking an invite require `human`. Discovery lists the accepted standing actions. A network cannot verify that a grant exists; that is the agent's obligation.
+Publishing a request, submitting an offer, confirming a connection, sending a message, and creating or revoking an invite require `human`. Discovery lists the accepted standing actions. A network cannot verify that a grant exists; that is the agent's obligation.
 
 `exp - iat` is at most 15 minutes. `permission_expires_at` must be later than the server clock when the action is submitted. For `submit_offer` it equals the offer's `permission_expires_at`. A signed action is valid only on the HTTP route for its action and target. An envelope sent to another route is `invalid_schema`. `iss`/`issuer` is the network issuer. `aud` is expressed by the envelope `audience`, which must equal the target id. The payload digest is the digest of the exact submitted payload object.
 
@@ -171,7 +171,7 @@ One live offer is allowed per principal per request. A replacement supersedes th
 `accept_offer` requires requester authority and compatible offer bounds.
 
 - `preauthorized` establishes the connection in the same transaction as capacity consumption and reputation credit.
-- `confirm_required` reserves one capacity slot for at most 15 minutes, and not beyond request, offer, or permission expiry. `confirm_connection` establishes it. Only establishment consumes permanent capacity and creates connection credit. Timeout, withdrawal, or revocation releases the reservation without credit.
+- `confirm_required` reserves one capacity slot until the confirmation deadline: the acceptance's optional `confirm_within_seconds` (at least 60), or `confirmation_seconds` when it is absent, capped at `confirmation_max_seconds`, and not beyond request, offer, or permission expiry. `confirm_connection` establishes it. Only establishment consumes permanent capacity and creates connection credit. Timeout, withdrawal, or revocation releases the reservation without credit.
 
 A principal cannot connect to itself, and a self-connection cannot earn credit.
 

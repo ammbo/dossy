@@ -5,6 +5,7 @@
   "additionalProperties": false,
   "required": ["requester_message_key"],
   "properties": {
-    "requester_message_key": { "$ref": "https://dossy.dev/schemas/jwk-enc.json" }
+    "requester_message_key": { "$ref": "https://dossy.dev/schemas/jwk-enc.json" },
+    "confirm_within_seconds": { "type": "integer", "minimum": 60 }
   }
 }

@@ -13,6 +13,7 @@
   "envelope_max_seconds": 900,
   "assertion_max_seconds": 300,
   "confirmation_seconds": 900,
+  "confirmation_max_seconds": 86400,
   "coordination_seconds": 86400,
   "clarifications_per_side": 2,
   "handoffs_per_side": 1,

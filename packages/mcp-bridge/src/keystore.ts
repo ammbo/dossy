@@ -29,7 +29,7 @@ export type PendingSend = {
   queued_at: string;
   keep_until: string;
   /** Local bookkeeping to apply once the network acknowledges the action. */
-  effects?: { rename_reply_from?: string; retarget_ref?: string };
+  effects?: { rename_reply_from?: string; retarget_ref?: string; screening?: string };
   /** `standing` when the human's standing grant covered the action instead of a fresh approval. */
   mode?: "human" | "standing";
 };
@@ -87,6 +87,8 @@ export type BridgeState = {
   followed?: string[];
   watches?: Watch[];
   fetched?: Record<string, FetchedRequest>;
+  /** request_id → screening rules the human approved with that request. Offers that meet them may be accepted under `standing` authorization. */
+  screening?: Record<string, { rules: string; expires_at: string }>;
 };
 
 const RECEIPT_LIMIT = 500;
@@ -242,6 +244,7 @@ export class Keystore implements SyncStore {
     this.state.gaps = this.state.gaps.slice(-100);
     this.state.digest = (this.state.digest ?? []).filter((item) => Date.parse(String(item.expires_at)) > now.getTime()).slice(-200);
     this.state.fetched = Object.fromEntries(Object.entries(this.state.fetched ?? {}).filter(([, item]) => Date.parse(item.expires_at) > now.getTime()).slice(-2000));
+    this.state.screening = Object.fromEntries(Object.entries(this.state.screening ?? {}).filter(([, item]) => Date.parse(item.expires_at) > now.getTime()));
   }
 }
 

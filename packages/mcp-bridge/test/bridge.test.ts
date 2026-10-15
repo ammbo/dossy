@@ -154,6 +154,37 @@ suite("MCP bridge end to end", () => {
     expect(requester.store.state.receipts.every((receipt) => receipt.approved)).toBe(true);
   });
 
+  it("allows the connection by default and accepts under screening rules without asking again", async () => {
+    const requester = await bridgeFor(target!, "screening-requester");
+    const responder = await bridgeFor(target!, "screening-responder");
+    const rules = "Accept anyone who has run growth at a B2B SaaS company.";
+    const published = await requester.bridge.publishRequest({ ...hiring(target!.boardId), screening: rules });
+    expect(requester.human.shown.at(-1)!.notes?.join(" ")).toContain(rules);
+    expect(JSON.stringify(requester.human.shown.at(-1)!.disclosure)).not.toContain(rules);
+
+    const offered = await responder.bridge.offerInterest({ request_id: String(published.request_id) });
+    expect(responder.human.shown.at(-1)!.permits?.join(" ")).toMatch(/without asking again/);
+    expect((await requester.bridge.activity()).my_requests).toEqual([expect.objectContaining({ request_id: published.request_id, screening: rules })]);
+
+    const asked = requester.human.shown.length;
+    const connected = await requester.bridge.acceptOffer(String(offered.offer_id));
+    expect(connected).toMatchObject({ sent: true, under_standing_grant: true, state: "established" });
+    expect(requester.human.shown).toHaveLength(asked);
+  });
+
+  it("lets the requester choose how long the responder has to confirm", async () => {
+    const requester = await bridgeFor(target!, "window-requester");
+    const responder = await bridgeFor(target!, "window-responder");
+    const published = await requester.bridge.publishRequest(hiring(target!.boardId));
+    const offered = await responder.bridge.offerInterest({ request_id: String(published.request_id), allow_connection: false });
+    await expect(requester.bridge.acceptOffer(String(offered.offer_id), 5000)).rejects.toThrow(/from 1 to 1440/);
+    const proposed = await requester.bridge.acceptOffer(String(offered.offer_id), 120);
+    expect(proposed).toMatchObject({ sent: true, state: "pending_confirmation" });
+    expect(proposed.under_standing_grant).toBeUndefined();
+    expect(requester.human.shown.at(-1)!.permits).toContain("Proposes a connection. The responder must confirm within 120 minutes");
+    expect(Math.abs(Date.parse(String(proposed.confirm_by)) - (target!.clock.now().getTime() + 120 * 60_000))).toBeLessThan(60_000);
+  });
+
   it("sends nothing when the human declines", async () => {
     const requester = await bridgeFor(target!, "decline-requester");
     const responder = await bridgeFor(target!, "decline-responder");

@@ -7,6 +7,8 @@ These are additions to `dcp/0.2`. A client or network that ignores them works as
 - **Link approval for enrollment.** A client that sends `confirmation_methods: ["link", "code"]` gets a single-use approval link in the enrollment email. The human approves by choosing their agent's key fingerprint from among decoys. The client polls `POST /v0.2/enrollments/{id}/poll` with the confirm proof. The code stays as a fallback.
 - **Existing accounts.** For such a client, an address that already has an account gets the same answer as a new one. The email connects the agent to that account, by link only, and leaves the invite unspent. The poll answer carries `existing_account: true`.
 - **Pairing.** Approval pages should ask the human to choose the agent's fingerprint from among decoys, and decline the pairing on a wrong choice.
+- **Confirmation window.** An acceptance may carry `confirm_within_seconds` (at least 60) to set how long the responder has to confirm a `confirm_required` offer. The default stays `confirmation_seconds` (900). The network caps it at the new bound `confirmation_max_seconds` (86400), and request, offer, and permission expiry still apply. Discovery lists both bounds.
+- **Screened acceptance.** `accept_offer` may carry `standing` authorization, for acceptances covered by screening rules the human approved with the request. Accepting shares no identity. Confirming a connection, messages, and handoffs still need `human`.
 
 ## 0.2.0
 
