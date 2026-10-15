@@ -80,8 +80,10 @@ async function main(): Promise<void> {
       if (store.state.agent_id) throw new Error(`Already paired as agent ${store.state.agent_id}.`);
       const client = new DossyClient({ networkUrl: store.state.network_url, issuer: store.state.issuer });
       await client.discover();
+      // State created by join or serve --invite may not have recorded the issuer yet.
+      store.state.issuer = client.issuer;
       const pairing = await client.startPairing(store.publicSigningJwk(), flag("label") ?? `dossy-bridge on ${hostname()}`);
-      process.stdout.write(`\nApprove this agent while signed in to ${String(store.state.issuer)}:\n\n  ${String(pairing.verification_uri_complete)}\n\nCode ${String(pairing.user_code)}, key fingerprint ${String(pairing.key_fingerprint)}\nWaiting for approval...\n`);
+      process.stdout.write(`\nApprove this agent while signed in to ${client.issuer}:\n\n  ${String(pairing.verification_uri_complete)}\n\nCode ${String(pairing.user_code)}, key fingerprint ${String(pairing.key_fingerprint)}\nWaiting for approval...\n`);
       await openInBrowser(String(pairing.verification_uri_complete));
       const agentId = await client.waitForPairing(String(pairing.pairing_id), await store.signingKey(), {
         intervalMs: Number(pairing.interval ?? 5) * 1000,

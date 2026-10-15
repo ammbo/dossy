@@ -62,12 +62,15 @@ export class ElicitationApprover implements Approver {
   }
 }
 
-type Pending = { approval: ApprovalRequest; nonce: string; resolve: (approved: boolean) => void; settled: boolean };
+type Pending = { approval: ApprovalRequest; nonce: string; resolve: (approved: boolean) => void; settled: boolean; timer: NodeJS.Timeout };
 
 /**
  * Serves the approval on 127.0.0.1 and opens it in the user's browser. The page address carries a
  * 128-bit token that is never returned to the model, so the model cannot approve on the human's
  * behalf. Used when the host does not support elicitation.
+ *
+ * While a decision is pending, the server and its timeout keep the process alive: a CLI command has
+ * nothing else to wait on. Idle, the server lets the process exit.
  */
 export class BrowserApprover implements Approver {
   private server?: Server;
@@ -79,26 +82,35 @@ export class BrowserApprover implements Approver {
   ) {}
 
   async request(approval: ApprovalRequest): Promise<ApprovalResult> {
-    await this.listen();
+    const server = await this.listen();
     const token = randomId();
     const decision = new Promise<boolean>((resolve) => {
-      this.pending.set(token, { approval, nonce: randomId(), resolve, settled: false });
+      const timer = setTimeout(() => resolve(false), this.options.timeoutMs ?? 10 * 60_000);
+      this.pending.set(token, { approval, nonce: randomId(), resolve, settled: false, timer });
     });
-    const url = `${this.origin}/approve/${token}`;
-    await (this.options.open ?? openInBrowser)(url);
-    const timer = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), this.options.timeoutMs ?? 10 * 60_000).unref());
-    const approved = await Promise.race([decision, timer]);
-    this.pending.delete(token);
-    return { approved, channel: "browser" };
+    server.ref();
+    try {
+      await (this.options.open ?? openInBrowser)(`${this.origin}/approve/${token}`);
+      return { approved: await decision, channel: "browser" };
+    } finally {
+      clearTimeout(this.pending.get(token)?.timer);
+      this.pending.delete(token);
+      if (!this.pending.size) server.unref();
+    }
   }
 
+  /** Stops serving. Any approval still open is declined. */
   async close(): Promise<void> {
+    for (const pending of this.pending.values()) {
+      pending.settled = true;
+      pending.resolve(false);
+    }
     await new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
     this.server = undefined;
   }
 
-  private async listen(): Promise<void> {
-    if (this.server) return;
+  private async listen(): Promise<Server> {
+    if (this.server) return this.server;
     const server = createServer((request, response) => this.handle(request, response));
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
@@ -106,6 +118,7 @@ export class BrowserApprover implements Approver {
     this.origin = `http://127.0.0.1:${address.port}`;
     this.server = server;
     server.unref();
+    return server;
   }
 
   private handle(request: IncomingMessage, response: ServerResponse): void {

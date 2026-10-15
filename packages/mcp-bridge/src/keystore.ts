@@ -144,8 +144,7 @@ export class Keystore implements SyncStore {
   private async write(now: Date): Promise<void> {
     this.prune(now);
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    const release = await lockfile.lock(this.path, { realpath: false, lockfilePath: `${this.path}.write.lock`, retries: { retries: 20, minTimeout: 20, maxTimeout: 100 } });
-    try {
+    await withLock(`${this.path}.write`, { retries: { retries: 20, minTimeout: 20, maxTimeout: 100 } }, async () => {
       let saved: BridgeState | undefined;
       try { saved = JSON.parse(await readFile(this.path, "utf8")) as BridgeState; }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -155,7 +154,7 @@ export class Keystore implements SyncStore {
       await writeFile(temporary, JSON.stringify(this.state, null, 2), { mode: 0o600 });
       await rename(temporary, this.path);
       await chmod(this.path, 0o600);
-    } finally { await release(); }
+    });
   }
 
   publicSigningJwk(): PublicJwk {
@@ -208,8 +207,26 @@ export class Keystore implements SyncStore {
 /** One process owns a state's read/modify/write lifecycle. A running server also schedules sync. */
 export async function withStateSession<T>(path: string, fn: () => Promise<T>): Promise<T> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const release = await lockfile.lock(path, { realpath: false, lockfilePath: `${path}.session.lock`, stale: 60_000, retries: 0 });
-  try { return await fn(); } finally { await release(); }
+  return withLock(`${path}.session`, { stale: 60_000, retries: 0 }, fn);
+}
+
+/**
+ * Holds `<name>.lock` while fn runs. proper-lockfile tracks its locks by the locked file's path, not
+ * the lockfile's, so the session and write locks name different files: sharing the state's path let
+ * a save inside a session replace, then release, the session's lock. A failure in fn wins over a
+ * failure to release.
+ */
+async function withLock<T>(name: string, options: lockfile.LockOptions, fn: () => Promise<T>): Promise<T> {
+  const release = await lockfile.lock(name, { ...options, realpath: false, lockfilePath: `${name}.lock` });
+  let result: T;
+  try {
+    result = await fn();
+  } catch (error) {
+    await release().catch(() => {});
+    throw error;
+  }
+  await release();
+  return result;
 }
 
 /**

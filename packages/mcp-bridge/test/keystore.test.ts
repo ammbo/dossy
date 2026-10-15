@@ -1,4 +1,4 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it } from "vitest";
@@ -30,6 +30,26 @@ it("serializes saves and permits only one process session for a state", async ()
     await withStateSession(path, async () => {
       await expect(withStateSession(path, async () => {})).rejects.toMatchObject({ code: "ELOCKED" });
     });
+    await withStateSession(path, async () => {});
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+it("keeps a session's lock through saves inside it and reports the command's own failure", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dcp-session-save-test-"));
+  try {
+    const path = join(dir, "bridge.json");
+    const store = await withStateSession(path, async () => {
+      const created = await Keystore.create(path, "https://network.example.test");
+      await created.save();
+      await expect(withStateSession(path, async () => {})).rejects.toMatchObject({ code: "ELOCKED" });
+      return created;
+    });
+    expect(await readdir(dir)).toEqual(["bridge.json"]);
+    await expect(withStateSession(path, async () => {
+      await store.save();
+      throw new Error("the command failed");
+    })).rejects.toThrow("the command failed");
+    expect(await readdir(dir)).toEqual(["bridge.json"]);
     await withStateSession(path, async () => {});
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
