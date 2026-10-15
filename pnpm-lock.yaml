@@ -11,15 +11,15 @@ importers:
       '@dossy/conformance':
         specifier: workspace:*
         version: link:conformance
-      '@dossy/mcp-bridge':
-        specifier: workspace:*
-        version: link:packages/mcp-bridge
       '@dossy/protocol':
         specifier: workspace:*
         version: link:protocol
       '@dossy/sdk':
         specifier: workspace:*
         version: link:packages/sdk
+      '@dossyai/mcp-bridge':
+        specifier: workspace:*
+        version: link:packages/mcp-bridge
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.1

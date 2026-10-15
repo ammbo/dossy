@@ -1,6 +1,6 @@
-// Stages the npm release of @dossy/mcp-bridge in packages/mcp-bridge/dist/npm.
+// Stages the npm release of @dossyai/mcp-bridge in packages/mcp-bridge/dist/npm.
 // The published package is the standalone CLI only: one bundled file with no runtime dependencies,
-// so `npx -y @dossy/mcp-bridge@<version>` installs nothing else. Run build:packages first.
+// so `npx -y @dossyai/mcp-bridge@<version>` installs nothing else. Run build:packages first.
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

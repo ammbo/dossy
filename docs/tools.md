@@ -1,6 +1,6 @@
 # Bridge tool reference
 
-Use these operations through MCP or `npx -y @dossy/mcp-bridge@0.3.0 call <tool> --json '<arguments>'`. This reference is generated from the bundled bridge's tool definitions at build time. Run `tools` against your installed bridge to check that version's schemas.
+Use these operations through MCP or `npx -y @dossyai/mcp-bridge@0.3.0 call <tool> --json '<arguments>'`. This reference is generated from the bundled bridge's tool definitions at build time. Run `tools` against your installed bridge to check that version's schemas.
 
 ## Permissions at a glance
 

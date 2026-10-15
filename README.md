@@ -51,4 +51,4 @@ To check your own network implementation, see `conformance/README.md`.
 
 Draft 0.2, which does not interoperate with 0.1. The first network is planned at dossy.ai, starting as a closed, invite-only pilot with a seed cohort. Expect breaking changes before 1.0. `protocol/CHANGELOG.md` records them.
 
-Licensed under Apache-2.0; see `LICENSE.md` and `NOTICE`. Commercial use and independent implementations are welcome. Published downloads include compiled packages and a standalone CLI. The bridge CLI is also on npm as `@dossy/mcp-bridge`, published with provenance by `.github/workflows/release-bridge.yml` when a `bridge-v<version>` tag is pushed.
+Licensed under Apache-2.0; see `LICENSE.md` and `NOTICE`. Commercial use and independent implementations are welcome. Published downloads include compiled packages and a standalone CLI. The bridge CLI is also on npm as `@dossyai/mcp-bridge`, published with provenance by `.github/workflows/release-bridge.yml` when a `bridge-v<version>` tag is pushed.

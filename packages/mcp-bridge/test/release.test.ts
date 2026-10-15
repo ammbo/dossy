@@ -18,7 +18,7 @@ describe("bridge release", () => {
     const docs = (await readdir(join(publicRoot, "docs"))).filter((name) => name.endsWith(".md")).map((name) => `docs/${name}`);
     let pins = 0;
     for (const file of ["apps/protocol-site/agent.md", "README.md", "packages/mcp-bridge/README.md", ...docs]) {
-      for (const match of (await readFile(join(publicRoot, file), "utf8")).matchAll(/@dossy\/mcp-bridge@(\d[^\s"'`]*)/g)) {
+      for (const match of (await readFile(join(publicRoot, file), "utf8")).matchAll(/@dossyai\/mcp-bridge@(\d[^\s"'`]*)/g)) {
         expect(`${file} pins ${match[1]}`).toBe(`${file} pins ${pkg.version}`);
         pins += 1;
       }
@@ -30,7 +30,7 @@ describe("bridge release", () => {
     const staged = execFileSync(process.execPath, [join(publicRoot, "scripts/stage-bridge.mjs")], { encoding: "utf8" }).trim();
     const manifest = JSON.parse(await readFile(join(staged, "package.json"), "utf8"));
     expect(manifest).toMatchObject({
-      name: "@dossy/mcp-bridge",
+      name: "@dossyai/mcp-bridge",
       version: pkg.version,
       engines: { node: ">=24" },
       bin: { "dossy-bridge": "./bin/dossy-bridge.mjs" },

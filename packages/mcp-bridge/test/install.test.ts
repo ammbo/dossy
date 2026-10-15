@@ -35,7 +35,7 @@ describe("host installer", () => {
 
   it("runs the pinned npm release through the npx beside this Node, with that Node first on PATH", () => {
     const unix = npxLauncher({ nodePath: "/opt/node/bin/node", platform: "darwin", env: { PATH: "/usr/bin:/opt/node/bin:/bin" }, exists: () => true, realpath: resolver({ "/opt/node/bin/node": "/opt/node/bin/node" }) });
-    expect(BRIDGE_PACKAGE).toMatch(/^@dossy\/mcp-bridge@\d+\.\d+\.\d+$/);
+    expect(BRIDGE_PACKAGE).toMatch(/^@dossyai\/mcp-bridge@\d+\.\d+\.\d+$/);
     expect(unix).toEqual({ command: "/opt/node/bin/npx", args: ["-y", BRIDGE_PACKAGE], env: { PATH: "/opt/node/bin:/usr/bin:/bin" } });
 
     const windows = npxLauncher({ nodePath: "C:\\Program Files\\nodejs\\node.exe", platform: "win32", env: { Path: "C:\\Windows" }, exists: () => true, realpath: resolver({}) });
