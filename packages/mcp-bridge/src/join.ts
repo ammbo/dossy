@@ -3,7 +3,14 @@ import { DossyClient, ProtocolClientError, digestJson, type Clock } from "@dossy
 import { Keystore } from "./keystore.js";
 
 export function parseJoinLink(link: string): { network: string; invite: string } {
-  const url = new URL(link);
+  const trimmed = link.trim();
+  if (/^[A-Za-z0-9_-]{16,256}$/.test(trimmed)) return { network: "https://dossy.ai", invite: trimmed };
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error("Use the full invite link a member sent you, or just the invite code.");
+  }
   if (url.username || url.password) throw new Error("Join links cannot contain URL credentials.");
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw new Error("Join links must use HTTPS (except local development).");
   const invite = url.searchParams.get("invite");

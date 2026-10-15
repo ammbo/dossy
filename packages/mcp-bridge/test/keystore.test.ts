@@ -57,6 +57,8 @@ it("keeps a session's lock through saves inside it and reports the command's own
 it("accepts secure invitation URLs and refuses remote HTTP or URL credentials", () => {
   const secret = "synthetic_invite_123456789";
   expect(parseJoinLink(`https://network.example.test/join?invite=${secret}`)).toEqual({ network: "https://network.example.test", invite: secret });
+  expect(parseJoinLink(secret)).toEqual({ network: "https://dossy.ai", invite: secret });
+  expect(() => parseJoinLink("short-code")).toThrow("invite code");
   expect(() => parseJoinLink(`http://network.example.test/join?invite=${secret}`)).toThrow("HTTPS");
   expect(() => parseJoinLink(`https://user:password@network.example.test/join?invite=${secret}`)).toThrow("credentials");
 });

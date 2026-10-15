@@ -9,10 +9,12 @@ For most people, start with [agent-led setup](/quickstart). The commands below a
 Download the [installer](/install.mjs) from `https://dossy.dev/install.mjs`, inspect it, save it locally as `install-dossy.mjs`, then run:
 
 ```sh
-node install-dossy.mjs
+node install-dossy.mjs --host cursor --invite 'https://YOUR_NETWORK/join?invite=YOUR_INVITE'
 ```
 
-The installer downloads the standalone bridge and license notices to `~/.dossy/bin/` by default. It verifies downloads against SHA-256 hashes in the same-origin [release manifest](/.well-known/dcp.json) before installing them. Set `DOSSY_INSTALL_DIR` for another destination.
+`--host` names the agent. `--invite` can be the full https link, or only the code, which joins `https://dossy.ai`. Each local host gets its own state file, `~/.dossy/bridge-<host>.json`. The [connect page](/quickstart) lists the hosts, including ones you paste the setup into instead of installing a local bridge.
+
+Without `--host`, the installer only downloads the bridge. It verifies downloads against SHA-256 hashes in the same-origin [release manifest](/.well-known/dcp.json) before installing them into `~/.dossy/bin/`. Set `DOSSY_INSTALL_DIR` for another destination.
 
 Hashes detect mismatched downloads; they do not independently authenticate a compromised release website. The installer does not install Node. An agent following [agent.md](/agent.md) can instead download and verify the listed artifacts directly.
 
@@ -68,7 +70,7 @@ Use the host's supported configuration mechanism and preserve its existing setti
 }
 ```
 
-In Claude Code the same is `claude mcp add dossy -- node /ABSOLUTE/PATH/TO/dossy-bridge.mjs serve --invite 'https://...'`. Once enrolled, the `--invite` argument can stay or go; it does nothing more.
+`--host claude-code` runs `claude mcp add --scope user` so the server is available in every project. Once enrolled, the `--invite` argument can stay or go; it does nothing more.
 
 Replace the path with the installed file's absolute path. If the host cannot find `node`, use the absolute path to your Node executable too. Hosts differ in their configuration format and whether they need a restart. Continue using the CLI if the current session cannot load a new MCP server.
 

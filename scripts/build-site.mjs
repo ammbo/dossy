@@ -5,6 +5,7 @@ import { dirname, join, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { marked } from "marked";
 
+import { pickerCss, renderAgents } from "../apps/protocol-site/install.mjs";
 import { style, layout, docsHome, docPages, documentation, headingId, escapeHtml } from "../apps/protocol-site/template.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 execFileSync(process.execPath, [join(root, "scripts/build-packages.mjs")], { cwd: root, stdio: "inherit" });
@@ -14,10 +15,10 @@ await rm(docs, { recursive: true, force: true });
 await mkdir(docs, { recursive: true });
 for (const [dir, body, kind] of [[docs, docsHome, "docs"]]) {
   await writeFile(join(dir, "index.html"), layout("Dossy documentation — Connect your personal agent", "Setup, examples, privacy, and integration guides for personal agents using Dossy and the open DCP protocol.", body, kind));
-  await writeFile(join(dir, "style.css"), style);
+  await writeFile(join(dir, "style.css"), style + pickerCss());
   await writeFile(join(dir, "favicon.svg"), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#142b26"/><text x="18" y="47" fill="#d5f0bb" font-family="system-ui" font-size="48" font-weight="700">d</text></svg>');
   await writeFile(join(dir, "404.html"), layout("Page not found · Dossy", "Page not found", '<section class="hero"><h1>That page is missing.</h1><p><a href="/">Browse the documentation →</a></p></section>', kind, { path: "/404", noindex: true }));
-  await writeFile(join(dir, "_headers"), "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\n/releases/*\n  Cache-Control: public, max-age=300\n/.well-known/*\n  Cache-Control: no-cache\n");
+  await writeFile(join(dir, "_headers"), "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Content-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\n/releases/*\n  Cache-Control: public, max-age=300\n/.well-known/*\n  Cache-Control: no-cache\n");
 }
 const tools = JSON.parse(execFileSync(process.execPath, [join(root, "packages/mcp-bridge/dist/dossy-bridge.mjs"), "tools"], { encoding: "utf8" })).tools;
 for (const page of docPages) {
@@ -41,7 +42,7 @@ for (const page of docPages) {
       return `\n### ${tool.name}\n\n${tool.description}\n\n<p class="tool-meta">${label}</p>\n\n${parameters ? `| Argument | Required? | Meaning |\n| --- | --- | --- |\n${parameters}\n\n` : "Takes no arguments.\n\n"}<details><summary>Complete JSON input schema</summary><pre><code>${escapeHtml(JSON.stringify(tool.inputSchema, null, 2))}</code></pre></details>\n`;
     }).join("\n");
   }
-  const rendered = marked.parse(markdown);
+  const rendered = marked.parse(markdown).replace("<!-- agents -->", slug === "quickstart" ? renderAgents() : "");
   const html = /<h1(?:\s|>)/.test(rendered) ? rendered : `<h1 id="${headingId(page.title)}">${escapeHtml(page.title)}</h1>\n${rendered}`;
   const headings = [...html.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)].map((match) => ({ id: match[1], title: match[2].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&") }));
   await writeFile(join(docs, `${slug}.html`), layout(`${page.title} · Dossy`, page.description, documentation(page, html, headings), "docs", { path: `/${slug}` }));
@@ -49,7 +50,7 @@ for (const page of docPages) {
 await cp(join(root, "docs/examples"), join(docs, "sample-requests"), { recursive: true });
 await writeFile(join(docs, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${["", ...docPages.map((p) => p.slug)].map((slug) => `<url><loc>https://dossy.dev/${slug}</loc></url>`).join("")}</urlset>`);
 await writeFile(join(docs, "robots.txt"), "User-agent: *\nAllow: /\nSitemap: https://dossy.dev/sitemap.xml\n");
-for (const file of ["agent.md", "install.mjs"]) await copyFile(join(root, "apps/protocol-site", file), join(docs, file));
+for (const file of ["agent.md", "install.mjs", "agent-picker.js"]) await copyFile(join(root, "apps/protocol-site", file), join(docs, file));
 for (const file of ["schemas", "vocabularies", "bounds.json", "openapi.yaml", "SPEC.md", "CHANGELOG.md"]) await cp(join(root, "protocol", file), join(docs, file), { recursive: true });
 const releases = join(docs, "releases");
 await mkdir(releases, { recursive: true });
