@@ -132,15 +132,44 @@ export class DossyClient {
    * Starts agent-led enrollment with a network invite. The network emails the human a 6-digit
    * code showing this agent's label and key fingerprint. The invite is not spent yet.
    */
-  async enroll(inviteCode: string, email: string, publicJwk: PublicJwk, label?: string): Promise<Record<string, unknown>> {
-    return this.call("POST", "/v0.2/enrollments", { invite_code: inviteCode, contact_email: email, public_jwk: publicJwk, label }, "none");
+  async enroll(inviteCode: string, email: string, publicJwk: PublicJwk, label?: string, options: { confirmationMethods?: string[] } = {}): Promise<Record<string, unknown>> {
+    return this.call("POST", "/v0.2/enrollments", {
+      invite_code: inviteCode,
+      contact_email: email,
+      public_jwk: publicJwk,
+      label,
+      ...(options.confirmationMethods ? { confirmation_methods: options.confirmationMethods } : {}),
+    }, "none");
+  }
+
+  private async enrollmentProof(id: string, signingKey: CryptoKey): Promise<string> {
+    const now = Math.floor(this.clock.now().getTime() / 1000);
+    return signClaims(signingKey, id, { enrollment_id: id, aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
   }
 
   /** Confirms enrollment with the code the human read back, proving possession of the key. */
   async confirmEnrollment(id: string, code: string, signingKey: CryptoKey): Promise<Record<string, unknown>> {
-    const now = Math.floor(this.clock.now().getTime() / 1000);
-    const proof = await signClaims(signingKey, id, { enrollment_id: id, aud: this.issuer, iat: now, exp: now + 120, jti: randomId() });
-    return this.call("POST", `/v0.2/enrollments/${encodeURIComponent(id)}/confirm`, { code, proof }, "none");
+    return this.call("POST", `/v0.2/enrollments/${encodeURIComponent(id)}/confirm`, { code, proof: await this.enrollmentProof(id, signingKey) }, "none");
+  }
+
+  /** Asks whether the human approved the emailed link, proving possession of the key. Answers `pending` or `connected`. */
+  async pollEnrollment(id: string, signingKey: CryptoKey): Promise<Record<string, unknown>> {
+    return this.call("POST", `/v0.2/enrollments/${encodeURIComponent(id)}/poll`, { proof: await this.enrollmentProof(id, signingKey) }, "none");
+  }
+
+  /** Polls until the human approves the emailed link, declines it, or it expires. Returns the connected answer. */
+  async waitForEnrollment(id: string, signingKey: CryptoKey, options: { intervalMs?: number; timeoutMs?: number } = {}): Promise<Record<string, unknown>> {
+    const deadline = Date.now() + (options.timeoutMs ?? 30 * 60_000);
+    for (;;) {
+      const status = await this.pollEnrollment(id, signingKey);
+      if (status.status === "connected" && typeof status.agent_id === "string") {
+        this.agentId = status.agent_id;
+        this.signingKey = signingKey;
+        return status;
+      }
+      if (Date.now() >= deadline) throw new ProtocolClientError("expired", "The enrollment was not approved in time.", 410);
+      await pause(options.intervalMs ?? Number(status.interval ?? 5) * 1000);
+    }
   }
 
   /** Redeems a private-board invite for this already-enrolled agent's principal. */
