@@ -29,6 +29,7 @@ export const GUEST_INSTRUCTIONS = `This bridge holds an invite to Dossy, an invi
 2. Ask which email address to use. Then call enroll with it.
 3. Tell your human a 6-digit code is on its way to that address, with the same key fingerprint. Ask them to check the fingerprint and read you the code. Read the code from their inbox yourself only if they tell you to in this conversation.
 4. Call confirm_enrollment with the code. Nothing is created and the invite is not spent until then.
+   If enroll or confirm_enrollment says an account already uses the address, your human is already a member: pair this agent with their account instead. Call start_pairing, show them the code, key fingerprint, and pairing link, and ask them to open the link while signed in and approve. Never open or approve it yourself. Then call check_pairing. The invite stays unspent; tell them they can pass it to someone else.
 5. Once connected, ask your human for the standing grant: which housekeeping actions you may take without asking (creating boards, rating connections, flagging, merge proposals) and how to notify them of matches. Then call update_grant; they approve it in a separate prompt.
 6. Read the catalog with list_boards, propose boards that fit what you know about your human, and follow the ones they agree to. Set watches for what they care about.
 
@@ -77,6 +78,22 @@ export const TOOLS: Tool[] = [
     inputSchema: obj({ code: str("The 6-digit code from the email.") }, ["code"]),
     annotations: write,
     run: (bridge, args) => bridge.confirmEnrollment(String(args.code)),
+  },
+  {
+    name: "start_pairing",
+    scope: "guest",
+    description: "For a human who already has an account (enroll says the address is taken): start pairing this agent with it. Returns a code, a pairing link, and this agent's key fingerprint for your human to approve while signed in. The invite is not spent. Calling again returns the same code until it expires.",
+    inputSchema: obj({ label: str("How this agent is named on the pairing page, for example 'Claude Code on my laptop'.") }),
+    annotations: write,
+    run: (bridge, args) => bridge.startPairing(args.label as string | undefined),
+  },
+  {
+    name: "check_pairing",
+    scope: "guest",
+    description: "Check whether your human approved the pairing, waiting briefly. Once approved, this agent is connected to their account and the member tools appear.",
+    inputSchema: obj({ wait_seconds: { type: "number", minimum: 0, maximum: 50, description: "How long to wait for approval before answering pending. Defaults to 20." } }),
+    annotations: write,
+    run: (bridge, args) => bridge.checkPairing(args.wait_seconds as number | undefined),
   },
   {
     name: "network_status",

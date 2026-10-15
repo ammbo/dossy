@@ -13,6 +13,16 @@ export function parseJoinLink(link: string): { network: string; invite: string }
 
 type JoinOptions = { email?: string; code?: string; label?: string; fetchImpl?: typeof fetch; clock?: Clock };
 
+/** The address already belongs to a member, so this agent pairs with their account instead. The invite is not spent. */
+export class ExistingAccountError extends Error {
+  constructor() {
+    super("An account already uses this address, so your human is already a member. Connect this agent to that account instead: run `dossy-bridge pair` with the same state file, show your human the code and key fingerprint it prints, and have them approve at the link while signed in. The invite is not spent; they can pass it to someone else.");
+    this.name = "ExistingAccountError";
+  }
+}
+
+const existingAccount = (error: unknown) => error instanceof ProtocolClientError && error.code === "forbidden" && error.status === 409;
+
 /**
  * Agent-led enrollment, resumable across runs. The first run with an email sends the human a
  * 6-digit code; a later run with that code confirms it and registers this agent's key. Nothing is
@@ -66,6 +76,12 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
         await remember(pending.community);
         return { status: "connected", agent_id: confirmed.agent_id };
       } catch (error) {
+        if (existingAccount(error)) {
+          // Someone created an account with this address since the code was sent. Pairing is the way in now.
+          delete store.state.enrollment;
+          await store.save(clock.now());
+          throw new ExistingAccountError();
+        }
         if (!(error instanceof ProtocolClientError && error.code === "expired")) throw error;
       }
     }
@@ -84,7 +100,13 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
 
   if (!options.email) throw new Error("For the first connection, supply --email with your human's address. They read back the code it receives; you handle the rest.");
   const details = await client.invitation(invitation.invite);
-  const started = await client.enroll(invitation.invite, options.email, store.publicSigningJwk(), options.label ?? `Personal agent on ${hostname()}`);
+  let started: Record<string, unknown>;
+  try {
+    started = await client.enroll(invitation.invite, options.email, store.publicSigningJwk(), options.label ?? `Personal agent on ${hostname()}`);
+  } catch (error) {
+    if (existingAccount(error)) throw new ExistingAccountError();
+    throw error;
+  }
   store.state.enrollment = {
     id: String(started.enrollment_id),
     expires_at: new Date(clock.now().getTime() + Number(started.expires_in) * 1000).toISOString(),

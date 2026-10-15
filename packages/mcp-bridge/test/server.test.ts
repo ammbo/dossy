@@ -5,10 +5,10 @@ import { BrowserApprover, serve, type Approver, type Bridge } from "../src/index
 type Rpc = { id?: string | number | null; method?: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: { code: number; message: string } };
 
 /** An MCP host over in-memory stdio. */
-function host(connect: (approver: Approver) => Promise<Bridge>) {
+function host(connect: (approver: Approver) => Promise<Bridge>, mode?: () => "guest" | "member") {
   const input = new PassThrough();
   const output = new PassThrough();
-  const done = serve({ input, output, connect, fallbackApprover: () => ({ request: async () => ({ approved: false, channel: "test" }) }) });
+  const done = serve({ input, output, connect, mode, fallbackApprover: () => ({ request: async () => ({ approved: false, channel: "test" }) }) });
   const inbox: Rpc[] = [];
   const waiters: (() => void)[] = [];
   let buffer = "";
@@ -157,6 +157,45 @@ describe("guest onboarding over MCP", () => {
     expect(after).not.toContain("enroll");
     input.end();
     await done;
+  });
+});
+
+describe("guest pairing over MCP", () => {
+  it("offers pairing to a guest whose human already has an account and announces the member tools once approved", async () => {
+    let approved = false;
+    const guest = {
+      mode: "guest" as "guest" | "member",
+      isModerator: async () => false,
+      enroll: async () => {
+        throw new Error("An account already uses this address, so your human is already a member. Connect this agent to their account instead: call start_pairing.");
+      },
+      startPairing: async (label?: string) => ({ status: "pending", user_code: "ABCD-EFGH", pairing_url: "https://network.test/pair?code=ABCD-EFGH", key_fingerprint: "AAAA BBBB CCCC DDDD", label }),
+      checkPairing: async (wait?: number) => {
+        if (!approved) return { status: "pending", wait };
+        guest.mode = "member";
+        return { status: "connected", agent_id: "agent-1" };
+      },
+    };
+    const mcp = host(async () => guest as unknown as Bridge, () => guest.mode);
+    const init = await mcp.call("initialize", { capabilities: {} });
+    expect(String(init.result?.instructions)).toContain("start_pairing");
+    const names = ((await mcp.call("tools/list")).result?.tools as { name: string }[]).map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["enroll", "confirm_enrollment", "start_pairing", "check_pairing"]));
+    const refused = await mcp.call("tools/call", { name: "enroll", arguments: { email: "me@example.test" } });
+    expect(refused.result?.isError).toBe(true);
+    expect(JSON.stringify(refused.result?.content)).toContain("start_pairing");
+    const started = await mcp.call("tools/call", { name: "start_pairing", arguments: { label: "Claude Code" } });
+    expect(started.result?.structuredContent).toMatchObject({ user_code: "ABCD-EFGH", pairing_url: expect.stringContaining("/pair?code="), key_fingerprint: "AAAA BBBB CCCC DDDD", label: "Claude Code" });
+    expect((await mcp.call("tools/call", { name: "check_pairing", arguments: { wait_seconds: 0 } })).result?.structuredContent).toEqual({ status: "pending", wait: 0 });
+    approved = true;
+    const connected = await mcp.call("tools/call", { name: "check_pairing", arguments: {} });
+    expect(connected.result?.structuredContent).toEqual({ status: "connected", agent_id: "agent-1" });
+    await mcp.next((message) => message.method === "notifications/tools/list_changed");
+    const after = ((await mcp.call("tools/list")).result?.tools as { name: string }[]).map((tool) => tool.name);
+    expect(after).toEqual(expect.arrayContaining(["publish_request", "update_grant"]));
+    expect(after).not.toContain("start_pairing");
+    expect(after).not.toContain("check_pairing");
+    await mcp.close();
   });
 });
 

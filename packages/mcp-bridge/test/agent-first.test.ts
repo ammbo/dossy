@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { loadTarget, type ConformanceTarget } from "@dossy/conformance";
 import { randomId } from "@dossy/sdk";
-import { Bridge, Keystore, type ApprovalRequest, type Approver, type MatchSummary } from "../src/index.js";
+import { Bridge, joinFromLink, Keystore, parseJoinLink, type ApprovalRequest, type Approver, type MatchSummary } from "../src/index.js";
 
 const target = await loadTarget();
 const suite = target?.latestCode ? describe : describe.skip;
@@ -66,6 +66,78 @@ suite("agent-first bridge", () => {
     expect(bridge.mode).toBe("member");
     expect(store.state.pending_invite).toBeUndefined();
     await expect(bridge.standing()).resolves.toMatchObject({ invites_remaining: 5 });
+  });
+
+  it("points an address that already has an account at pairing, before and after the code is sent", async () => {
+    const inviter = await target!.enroll("existing-inviter");
+    const invite = await inviter.client.createInvite({ kind: "network" });
+    const email = `existing-${tag()}@example.test`;
+    const racing = await guestBridge(target!, local(invite.invite_url));
+    await racing.bridge.enroll(email);
+    const racingCode = String(await target!.latestCode!(email));
+    // The same human joins through another invite before reading the first code back.
+    const other = await inviter.client.createInvite({ kind: "network" });
+    const first = await guestBridge(target!, local(other.invite_url));
+    await first.bridge.enroll(email);
+    await first.bridge.confirmEnrollment(String(await target!.latestCode!(email)));
+    await expect(racing.bridge.confirmEnrollment(racingCode)).rejects.toThrow(/start_pairing/);
+    expect(racing.store.state.enrollment).toBeUndefined();
+
+    const late = await guestBridge(target!, local(invite.invite_url));
+    await expect(late.bridge.enroll(email)).rejects.toThrow(/already uses this address[\s\S]*start_pairing[\s\S]*not spent/);
+    expect(late.store.state.enrollment).toBeUndefined();
+    expect(late.bridge.mode).toBe("guest");
+    // The CLI says the same and names its own command.
+    const cli = await guestBridge(target!, local(invite.invite_url));
+    await expect(joinFromLink(cli.store, local(invite.invite_url), { email, fetchImpl: cli.bridge.client.fetchImpl, clock: target!.clock })).rejects.toThrow(/dossy-bridge pair/);
+    await expect(inviter.client.invitation(parseJoinLink(local(invite.invite_url)).invite)).resolves.toMatchObject({ kind: "network" });
+  });
+
+  it("pairs a guest with its human's account, switches to member tools, and leaves the invite unspent", async () => {
+    const inviter = await target!.enroll("pair-inviter");
+    const invite = await inviter.client.createInvite({ kind: "network", label: "Ana" });
+    const { bridge, store } = await guestBridge(target!, local(invite.invite_url));
+    const read = await bridge.readInvitation();
+    await expect(bridge.checkPairing(0)).rejects.toThrow(/start_pairing first/);
+    const started = await bridge.startPairing("Claude Code on a laptop");
+    expect(started).toMatchObject({
+      status: "pending",
+      user_code: expect.any(String),
+      key_fingerprint: read.key_fingerprint,
+      next: expect.stringContaining("check_pairing"),
+    });
+    expect(String(started.pairing_url)).toContain(`/pair?code=${String(started.user_code)}`);
+    expect(await bridge.startPairing()).toMatchObject({ user_code: started.user_code });
+    expect(await bridge.checkPairing(0)).toMatchObject({ status: "pending", user_code: started.user_code });
+    await expect(bridge.networkStatus()).resolves.toMatchObject({ mode: "guest", pairing: { pending: true, user_code: started.user_code, key_fingerprint: read.key_fingerprint } });
+
+    const human = await target!.enroll("pair-human");
+    await target!.approvePairing!(human, String(started.user_code));
+    const connected = await bridge.checkPairing(0);
+    expect(connected).toMatchObject({ status: "connected", agent_id: expect.any(String), next: expect.stringContaining("update_grant") });
+    expect(String(connected.next)).toContain("pass it to someone else");
+    expect(bridge.mode).toBe("member");
+    expect(store.state).toMatchObject({ agent_id: connected.agent_id });
+    expect(store.state.pairing).toBeUndefined();
+    expect(store.state.pending_invite).toBeUndefined();
+    // The human already belongs to a private board; the paired agent follows it as a new member would.
+    expect(store.state.followed).toContain(target!.boardId);
+    await expect(bridge.standing()).resolves.toMatchObject({ invites_remaining: expect.any(Number) });
+    await expect(bridge.checkPairing()).resolves.toMatchObject({ status: "connected", agent_id: connected.agent_id });
+    await expect(inviter.client.invitation(parseJoinLink(local(invite.invite_url)).invite)).resolves.toMatchObject({ kind: "network", inviter_label: "Ana" });
+  });
+
+  it("drops an expired pairing and starts a fresh code", async () => {
+    const inviter = await target!.enroll("expiry-inviter");
+    const invite = await inviter.client.createInvite({ kind: "network" });
+    const { bridge, store } = await guestBridge(target!, local(invite.invite_url));
+    const started = await bridge.startPairing();
+    await target!.advanceTime!(11 * 60_000);
+    await expect(bridge.checkPairing(0)).rejects.toThrow(/expired[\s\S]*start_pairing/);
+    expect(store.state.pairing).toBeUndefined();
+    const again = await bridge.startPairing();
+    expect(again.user_code).not.toEqual(started.user_code);
+    expect(bridge.mode).toBe("guest");
   });
 
   it("asks the human for everything outside the grant, and always for the grant itself", async () => {

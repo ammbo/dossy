@@ -75,6 +75,8 @@ export type BridgeState = {
   digest?: Record<string, unknown>[];
   /** A network invite from the agent's setup, used until enrollment and then ignored. */
   pending_invite?: string;
+  /** A guest pairing with the human's existing account, waiting for them to approve it while signed in. */
+  pairing?: { id: string; user_code: string; pairing_url: string; key_fingerprint: string; interval: number; expires_at: string };
   grant?: StandingGrant;
   /** Boards to surface new requests from. Open boards are read through the network feed. */
   followed?: string[];

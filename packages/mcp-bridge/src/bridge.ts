@@ -1,3 +1,5 @@
+import { hostname } from "node:os";
+import { setTimeout as pause } from "node:timers/promises";
 import { calculateJwkThumbprint } from "jose";
 import {
   assertSchema,
@@ -23,7 +25,7 @@ import {
   type PublicJwk,
   type Watch,
 } from "@dossy/sdk";
-import { joinFromLink, parseJoinLink } from "./join.js";
+import { ExistingAccountError, joinFromLink, parseJoinLink } from "./join.js";
 import type { Approver, ApprovalRequest } from "./approval.js";
 import type { FetchedRequest, Keystore, PendingSend, StandingGrant } from "./keystore.js";
 import { notifyHuman, type Notifier } from "./notify.js";
@@ -145,7 +147,7 @@ export class Bridge {
   }
 
   private requireMember(): void {
-    if (this.mode !== "member") throw new ToolError("Finish enrollment first: call enroll, then confirm_enrollment with the code your human reads back.");
+    if (this.mode !== "member") throw new ToolError("Finish joining first: call enroll, then confirm_enrollment with the code your human reads back. If they already have an account, call start_pairing instead.");
   }
 
   // Guest onboarding. The script lives in the guest instructions; these are its steps.
@@ -170,13 +172,13 @@ export class Bridge {
   /** Sends the emailed code. Nothing is created and the invite is not spent until the code is confirmed. */
   async enroll(email: string, label?: string): Promise<Row> {
     if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
-    return joinFromLink(this.store, String(this.store.state.pending_invite), { email, label, fetchImpl: this.options.fetchImpl, clock: this.clock });
+    return this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { email, label, fetchImpl: this.options.fetchImpl, clock: this.clock }));
   }
 
   /** Confirms the code the human read back. On success this bridge becomes a member. */
   async confirmEnrollment(code: string): Promise<Row> {
     if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
-    const result = await joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock });
+    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock }));
     if (result.status !== "connected") return result;
     delete this.store.state.pending_invite;
     this.store.state.followed ??= [];
@@ -190,12 +192,112 @@ export class Bridge {
     };
   }
 
+  /** An address that already has an account cannot enroll again. Point the agent at pairing. */
+  private async joining(fn: () => Promise<Row>): Promise<Row> {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof ExistingAccountError) {
+        throw new ToolError("An account already uses this address, so your human is already a member. Connect this agent to their account instead: call start_pairing, show your human the code, key fingerprint, and pairing link, and have them approve it while signed in. Then call check_pairing. The invite is not spent; they can pass it to someone else.");
+      }
+      throw error;
+    }
+  }
+
+  // Pairing, for a human who already has an account. The invite in the setup is left unspent.
+
+  /** Starts pairing this agent's key with the human's account, or returns the pairing already waiting. */
+  async startPairing(label?: string): Promise<Row> {
+    if (this.mode === "member") return { status: "connected", note: "This agent is already connected." };
+    let pairing = this.store.state.pairing;
+    if (!pairing || Date.parse(pairing.expires_at) <= this.now().getTime()) {
+      const started = await this.client.startPairing(this.store.publicSigningJwk(), label?.trim() || `dossy-bridge on ${hostname()}`);
+      pairing = {
+        id: String(started.pairing_id),
+        user_code: String(started.user_code),
+        pairing_url: String(started.verification_uri_complete),
+        key_fingerprint: String(started.key_fingerprint),
+        interval: Number(started.interval ?? 5),
+        expires_at: this.at(Number(started.expires_in ?? 600) * 1000),
+      };
+      this.store.state.pairing = pairing;
+      await this.store.save(this.now());
+    }
+    return {
+      status: "pending",
+      user_code: pairing.user_code,
+      pairing_url: pairing.pairing_url,
+      key_fingerprint: pairing.key_fingerprint,
+      expires_at: pairing.expires_at,
+      next: "Show your human the code, key fingerprint, and pairing link above. They open the link while signed in to their account, check that the code and fingerprint match, and approve. Do not open or approve it yourself. Then call check_pairing. The invite is not spent; they can pass it to someone else.",
+    };
+  }
+
+  /** Asks whether the human approved the pairing, waiting up to waitSeconds. On approval this bridge becomes a member. */
+  async checkPairing(waitSeconds = 20): Promise<Row> {
+    if (this.mode === "member") return { status: "connected", agent_id: this.store.state.agent_id, note: "This agent is already connected." };
+    const pairing = this.store.state.pairing;
+    if (!pairing) throw new ToolError("No pairing is waiting. Call start_pairing first.");
+    const deadline = Date.now() + Math.min(Math.max(Number(waitSeconds) || 0, 0), 50) * 1000;
+    const interval = Math.max(pairing.interval, 1) * 1000;
+    for (;;) {
+      let status: Row;
+      try {
+        if (Date.parse(pairing.expires_at) <= this.now().getTime()) throw new ProtocolClientError("expired", "This pairing has expired.", 410);
+        status = await this.client.pollPairing(pairing.id, await this.store.signingKey());
+      } catch (error) {
+        if (!(error instanceof ProtocolClientError && (error.code === "forbidden" || error.code === "expired"))) throw error;
+        delete this.store.state.pairing;
+        await this.store.save(this.now());
+        throw new ToolError(error.code === "forbidden"
+          ? "Your human declined this pairing. Ask whether they want to try again before calling start_pairing."
+          : "The pairing code expired before your human approved it. Call start_pairing for a new code.");
+      }
+      if (status.status === "approved" && typeof status.agent_id === "string") return this.paired(status.agent_id);
+      if (Date.now() + interval > deadline) {
+        return {
+          status: "pending",
+          user_code: pairing.user_code,
+          pairing_url: pairing.pairing_url,
+          key_fingerprint: pairing.key_fingerprint,
+          expires_at: pairing.expires_at,
+          next: "Not approved yet. Wait until your human says they approved at the pairing link, then call check_pairing again.",
+        };
+      }
+      await pause(interval);
+    }
+  }
+
+  private async paired(agentId: string): Promise<Row> {
+    this.store.state.agent_id = agentId;
+    delete this.store.state.pairing;
+    delete this.store.state.enrollment;
+    delete this.store.state.pending_invite;
+    await this.store.save(this.now());
+    this.client.agentId = agentId;
+    this.client.signingKey = await this.store.signingKey();
+    // An existing member may already belong to private boards. If listing them fails, the next start adopts them.
+    await this.adoptMemberBoards().catch(() => {});
+    return {
+      status: "connected",
+      agent_id: agentId,
+      next: "Tell your human this agent is connected to their account and the invite was not used, so they can pass it to someone else; the --invite argument can come out of the setup. Then ask for the standing grant (which housekeeping actions you may take without asking, and how to notify them) and call update_grant, read the catalog, follow fitting boards, and set watches for what they care about.",
+    };
+  }
+
   // Reads. Nothing here is recorded by the network, and nothing here is sent anywhere else.
 
   async networkStatus(): Promise<Row> {
     const discovery = await this.client.discover();
     if (this.mode === "guest") {
-      return { mode: "guest", network: this.store.state.network_url, issuer: discovery.issuer, enrollment: this.store.state.enrollment ? { pending: true, key_fingerprint: this.store.state.enrollment.fingerprint } : null };
+      const pairing = this.store.state.pairing;
+      return {
+        mode: "guest",
+        network: this.store.state.network_url,
+        issuer: discovery.issuer,
+        enrollment: this.store.state.enrollment ? { pending: true, key_fingerprint: this.store.state.enrollment.fingerprint } : null,
+        pairing: pairing ? { pending: true, user_code: pairing.user_code, pairing_url: pairing.pairing_url, key_fingerprint: pairing.key_fingerprint, expires_at: pairing.expires_at } : null,
+      };
     }
     return {
       mode: "member",

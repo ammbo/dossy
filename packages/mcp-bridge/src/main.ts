@@ -16,7 +16,7 @@ const USAGE = `dossy-bridge: connect an existing agent to a DCP network.
   dossy-bridge tools                              List available operations and argument schemas
   dossy-bridge call <tool> --json '<arguments>'    Participate directly through your agent's terminal
   dossy-bridge init --network <url>          Create local keys for a network
-  dossy-bridge pair [--label <name>]         Connect this agent to your account: approve the code in your browser
+  dossy-bridge pair [--label <name>]         Connect this agent to an account you already have: approve the code in your browser
   dossy-bridge register --account-token <t>  Register with an account token instead of pairing
   dossy-bridge serve [--invite <url>]        Run the MCP server on stdio (for your agent host). With an
                                              invite and no enrollment yet, it starts as a guest that

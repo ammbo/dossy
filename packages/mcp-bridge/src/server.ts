@@ -105,7 +105,7 @@ export function serve(options: ServeOptions): Promise<void> {
           const mode = modeOf(connected);
           const tool = findTool(name, mode, await moderatorOf(connected));
           if (!tool) {
-            const text = mode === "guest" ? `${name} is available once your human has joined. Finish enrollment first.` : `${name} is not available to this agent.`;
+            const text = mode === "guest" ? `${name} is available once your human has joined. Finish enrollment first, or pairing if they already have an account.` : `${name} is not available to this agent.`;
             return { content: [{ type: "text", text }], isError: true };
           }
           const result = await exclusive(() => tool.run(connected, args));

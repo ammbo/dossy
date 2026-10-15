@@ -16,6 +16,8 @@ An action you already approved may be queued after an uncertain acknowledgment. 
 
 Check the address supplied and the spam folder. The code works for 30 minutes and allows 5 attempts; after that, start enrollment again with the same invite, which is still unspent. Check that the key fingerprint in the email matches what the agent shows before reading the code back.
 
+If enrollment says an account already uses the address, you are already a member. Have your agent pair instead: `start_pairing` and `check_pairing` in a guest bridge, or `dossy-bridge pair` from the CLI. Approve the code at the pairing link while signed in. The invite stays unspent, so you can pass it to someone else.
+
 If the confirmation answer was lost, run the join again (or call `confirm_enrollment` again) with the same state file; a confirmed key is recovered. If an invite is invalid or already used, ask the member who invited you for a new one rather than deleting the state reflexively. A board invite cannot admit someone new; it needs a network invite first.
 
 ## Node is missing or too old
