@@ -15,7 +15,7 @@ const sites = new Map([["https://dossy.dev", docs]]);
 if (process.argv[2]) sites.set("https://dossy.ai", resolve(process.argv[2]));
 const isFile = async (path) => stat(path).then((info) => info.isFile(), () => false);
 // These paths are served by the network, not the static marketing site.
-const LIVE_ON_NETWORK = /^\/(?:v0\.2(?:\/|$)|\.well-known\/dcp$|health$|(?:account|pair|join|verify|login|logout)(?:\/|$))/;
+const LIVE_ON_NETWORK = /^\/(?:v0\.2(?:\/|$)|\.well-known\/dcp$|health$|(?:account|pair|enroll|join|verify|login|logout)(?:\/|$))/;
 const resolveRoute = async (dir, pathname) => {
   const base = resolve(dir, `.${decodeURIComponent(pathname)}`);
   if (base !== dir && !base.startsWith(dir + sep)) throw new Error("Route escaped static directory.");
