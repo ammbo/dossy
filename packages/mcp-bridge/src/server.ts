@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "node:stream";
-import { BrowserApprover, ElicitationApprover, type Approver } from "./approval.js";
+import { AgentHostApprover, ApprovalTimeoutError, BrowserApprover, ElicitationApprover, type ApprovalMode, type Approver } from "./approval.js";
 import { Bridge, ToolError } from "./bridge.js";
 import { findTool, instructionsFor, rejectSecretArguments, toolsFor } from "./tools.js";
 import { trySyncLease, withStateTask } from "./keystore.js";
@@ -24,6 +24,9 @@ export type ServeOptions = {
   fallbackApprover?: () => Approver;
   /** Whether the state is enrolled yet, before the bridge connects. Defaults to member. */
   mode?: () => "guest" | "member";
+  /** Default: trust consent already obtained by the agent. `prompt` adds a separate human UI. */
+  approvalMode?: ApprovalMode;
+  approvalTimeoutMs?: number;
   /** Override scheduling in embedded runtimes/tests. Defaults: sync every five minutes, lease retry every two seconds. */
   syncIntervalMs?: number;
   leaseCheckMs?: number;
@@ -51,13 +54,20 @@ export function serve(options: ServeOptions): Promise<void> {
   const request = (method: string, params: Record<string, unknown>) =>
     new Promise<Record<string, unknown>>((resolve, reject) => {
       const id = `bridge-${nextId++}`;
-      pending.set(id, (message) => (message.error ? reject(new Error(message.error.message)) : resolve((message.result ?? {}) as Record<string, unknown>)));
+      const timeoutMs = options.approvalTimeoutMs ?? 10 * 60_000;
+      const timer = setTimeout(() => { pending.delete(id); reject(new ApprovalTimeoutError("the requested action", timeoutMs)); }, timeoutMs);
+      pending.set(id, (message) => {
+        clearTimeout(timer);
+        if (message.error) reject(new Error(message.error.message));
+        else resolve((message.result ?? {}) as Record<string, unknown>);
+      });
       write({ id, method, params });
     });
 
-  const approver = (): Approver => clientCanElicit
+  let activeApprover: Approver | undefined;
+  const approver = (): Approver => activeApprover = options.approvalMode !== "prompt" ? new AgentHostApprover() : clientCanElicit
     ? new ElicitationApprover((params) => request("elicitation/create", params))
-    : (options.fallbackApprover ?? (() => new BrowserApprover()))();
+    : (options.fallbackApprover ?? (() => new BrowserApprover({ timeoutMs: options.approvalTimeoutMs })))();
 
   const ready = () => {
     bridge ??= options.connect(approver()).catch((error: unknown) => {
@@ -204,6 +214,9 @@ export function serve(options: ServeOptions): Promise<void> {
     options.input.on("end", () => {
       stopped = true;
       clearInterval(timer);
+      for (const settle of pending.values()) settle({ error: { code: INTERNAL_ERROR, message: "Approval channel disconnected before a decision. No new action was sent." } });
+      pending.clear();
+      void activeApprover?.close?.();
       void work.finally(async () => { await relinquish(); resolve(); });
     });
   });

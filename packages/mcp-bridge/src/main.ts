@@ -2,7 +2,7 @@
 import { access } from "node:fs/promises";
 import { hostname } from "node:os";
 import { DossyClient, ProtocolClientError } from "@dossy/sdk";
-import { BrowserApprover, openInBrowser } from "./approval.js";
+import { AgentHostApprover, BrowserApprover, openInBrowser, type ApprovalMode } from "./approval.js";
 import { Bridge, DEFAULT_NETWORK } from "./bridge.js";
 import { defaultStatePath, expandHome, Keystore, trySyncLease, withStateSession, withStateTask } from "./keystore.js";
 import { joinFromLink, parseJoinLink } from "./join.js";
@@ -29,6 +29,11 @@ const USAGE = `dossy-bridge: connect an existing agent to a DCP network.
   dossy-bridge status                        Show the network, agent, and queued actions
   dossy-bridge --version                     Print the bridge version
 
+Writes trust human authorization already obtained by the agent. To add a separate human prompt,
+use --approval prompt (or DOSSY_APPROVAL_MODE=prompt). The default is --approval agent.
+HTTP requests time out after 30 seconds each; DOSSY_REQUEST_TIMEOUT_SECONDS overrides it.
+Optional prompts time out after 600 seconds; DOSSY_APPROVAL_TIMEOUT_SECONDS overrides it.
+
 State lives in ${defaultStatePath()} (override with DOSSY_BRIDGE_STATE). It holds private keys
 and approval receipts and never leaves this machine.`;
 
@@ -48,6 +53,16 @@ async function main(): Promise<void> {
     return;
   }
   const path = expandHome(flag("state") ?? defaultStatePath());
+  const approvalMode = flag("approval") ?? process.env.DOSSY_APPROVAL_MODE ?? "agent";
+  if (approvalMode !== "agent" && approvalMode !== "prompt") throw new Error("--approval must be agent or prompt.");
+  const seconds = (name: string, fallback: number) => {
+    const value = Number(process.env[name] ?? fallback);
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number of seconds.`);
+    return value * 1000;
+  };
+  const bridgeOptions = { requestTimeoutMs: seconds("DOSSY_REQUEST_TIMEOUT_SECONDS", 30) };
+  const approvalTimeoutMs = seconds("DOSSY_APPROVAL_TIMEOUT_SECONDS", 600);
+  const approverFor = () => approvalMode === "prompt" ? new BrowserApprover({ timeoutMs: approvalTimeoutMs }) : new AgentHostApprover();
   switch (command) {
     case "--version":
     case "version":
@@ -60,7 +75,7 @@ async function main(): Promise<void> {
       const store = await exists(path) ? await Keystore.open(path) : await Keystore.create(path, invitation.network);
       // Run again with neither, and it waits up to --wait seconds (default 45) for the emailed link's approval.
       const waitSeconds = flag("email") || flag("code") ? undefined : Number(flag("wait") ?? 45);
-      process.stdout.write(`${JSON.stringify(await joinFromLink(store, link, { email: flag("email"), code: flag("code"), label: flag("label"), waitSeconds }), null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(await joinFromLink(store, link, { email: flag("email"), code: flag("code"), label: flag("label"), waitSeconds, ...bridgeOptions }), null, 2)}\n`);
       return;
     }
     case "tools":
@@ -71,14 +86,14 @@ async function main(): Promise<void> {
       if (!tool) throw new Error("Unknown tool. Run dossy-bridge tools for available operations.");
       const args = JSON.parse(flag("json") ?? "{}") as Record<string, unknown>;
       rejectSecretArguments(args);
-      const approver = new BrowserApprover();
+      const approver = approverFor();
       try {
-        const bridge = await Bridge.start(await Keystore.open(path), approver);
+        const bridge = await Bridge.start(await Keystore.open(path), approver, bridgeOptions);
         const result = tool.scope === "guest"
           ? await withStateTask(path, "session", async () => { await bridge.refresh(); return tool.run(bridge, args); })
           : await tool.run(bridge, args);
         process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-      } finally { await approver.close(); }
+      } finally { await (approver as { close?: () => Promise<void> }).close?.(); }
       return;
     }
     case "init": {
@@ -86,7 +101,7 @@ async function main(): Promise<void> {
       if (!network) throw new Error("init needs --network <url>.");
       if (await exists(path)) throw new Error(`${path} already exists. Move it aside to start over.`);
       const store = await Keystore.create(path, network);
-      const discovery = await new DossyClient({ networkUrl: network }).discover();
+      const discovery = await new DossyClient({ networkUrl: network, ...bridgeOptions }).discover();
       store.state.issuer = String(discovery.issuer);
       await store.save();
       process.stdout.write(`Created ${path} for ${String(discovery.issuer)}.\nNext: dossy-bridge pair\n`);
@@ -95,7 +110,7 @@ async function main(): Promise<void> {
     case "pair": {
       const store = await Keystore.open(path);
       if (store.state.agent_id) throw new Error(`Already paired as agent ${store.state.agent_id}.`);
-      const client = new DossyClient({ networkUrl: store.state.network_url, issuer: store.state.issuer });
+      const client = new DossyClient({ networkUrl: store.state.network_url, issuer: store.state.issuer, ...bridgeOptions });
       await client.discover();
       // State created by join or serve --invite may not have recorded the issuer yet.
       store.state.issuer = client.issuer;
@@ -115,7 +130,7 @@ async function main(): Promise<void> {
       const token = flag("account-token");
       if (!token) throw new Error("register needs --account-token <token>.");
       const store = await Keystore.open(path);
-      const client = new DossyClient({ networkUrl: store.state.network_url, issuer: store.state.issuer, accountToken: token });
+      const client = new DossyClient({ networkUrl: store.state.network_url, issuer: store.state.issuer, accountToken: token, ...bridgeOptions });
       const registered = await client.registerAgent(store.publicSigningJwk());
       store.state.agent_id = String(registered.agent_id);
       await store.save();
@@ -139,7 +154,9 @@ async function main(): Promise<void> {
       await serve({
         input: process.stdin,
         output: process.stdout,
-        connect: (approver) => Bridge.start(store, approver),
+        connect: (approver) => Bridge.start(store, approver, bridgeOptions),
+        approvalMode: approvalMode as ApprovalMode,
+        approvalTimeoutMs,
         mode: () => (store.state.agent_id ? "member" : "guest"),
       });
       return;
@@ -152,7 +169,7 @@ async function main(): Promise<void> {
       }
       try {
         const store = await Keystore.open(path);
-        const bridge = await Bridge.start(store, new BrowserApprover());
+        const bridge = await Bridge.start(store, approverFor(), bridgeOptions);
         const count = await bridge.syncToDigest();
         process.stderr.write(`${count} new request(s) held for your agent.\n`);
       } finally { await release(); }
@@ -160,7 +177,7 @@ async function main(): Promise<void> {
     }
     case "status": {
       const store = await Keystore.open(path);
-      const bridge = await Bridge.start(store, new BrowserApprover());
+      const bridge = await Bridge.start(store, approverFor(), bridgeOptions);
       process.stdout.write(`${JSON.stringify(await bridge.networkStatus(), null, 2)}\n`);
       return;
     }

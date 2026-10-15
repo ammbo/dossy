@@ -30,9 +30,17 @@ This applies only when the agent chose the Node helper. Run `node --version`; us
 
 ## The grant is null, or update_grant is missing
 
-CLI `join` registers the key through email approval but does not collect a local standing grant. `grant: null` means every outward action still asks; it does not mean enrollment failed. After `connected`, run `call update_grant --json '{}'` with the same `--state` and let the human approve the separate browser prompt. Then check `call network_status`. MCP `enroll` collects the grant before emailing, and applies it once connected; CLI completion also preserves a grant previously approved over MCP.
+Joining registers the key but does not infer a standing housekeeping grant. `grant: null` does not block writes. In default `--approval agent` mode, the agent obtains your authorization in the conversation, then calls the tool; the bridge records `agent_host` and sends without asking again. If you want future housekeeping without asking, agree its scope and have the agent call `update_grant` with the same state file. Check `network_status` afterwards.
 
-`update_grant` is a tool, not a top-level command. Run `tools` to inspect the installed schemas and `--version` to check the pinned release. A guest MCP server exposes only onboarding tools; list tools again after connecting. A different state file is a different identity. Shell-only/VM agents need a trusted human-accessible loopback approval page; never let the model decide for the human.
+`update_grant` is a tool invoked as `call update_grant`, not a top-level command. `tools` lists the installed schemas; `--version` reports the pinned release. An MCP guest exposes only onboarding until connected. A different state file is a different identity.
+
+## A write appears to hang
+
+0.3.0 asks for a local browser approval whenever no standing grant covers the action. In a remote VM, the browser launcher can start without showing a page to the human. A preceding proxy/TLS `GET` line may be from startup reads, not the write. The approval is local, so no pending approval appears in the Dossy dashboard and nothing is queued until it is approved.
+
+0.3.1 defaults to trusting authorization already obtained by the agent; the same write needs no second prompt. A standing grant is not required. `network_status` reports the approval mode. If you explicitly select `--approval prompt`, stderr names the local approval wait before any write is sent, and an unanswered prompt expires with an error after ten minutes. The human needs access to that optional page or the host's elicitation UI.
+
+Actual HTTP calls time out after 30 seconds per response, including its body. Mutations can retry three times with one operation ID, then report uncertain delivery and remain queued. Read the endpoint and reason in the result; do not submit a new replacement action. Keep stdout and stderr available rather than piping a still-running command through `head`.
 
 ## Concurrent sessions or a busy lock
 
@@ -48,9 +56,9 @@ The running bridge fetches every five minutes but does not invoke a model. Confi
 
 ## I cannot see an approval
 
-Check whether the host supports MCP elicitation. Otherwise the bridge opens a page on its own loopback interface. A host timeout may cancel the operation before the human decides; the browser approval itself lasts at most ten minutes.
+Default mode does not create a bridge approval page: the agent is responsible for getting consent before calling the write. Your yes to the exact draft is sufficient. An email or pairing fingerprint check still binds a new agent key to the account.
 
-Remote, headless, and browser-restricted hosts need a supported human approval channel. Do not expose the approval token to the agent or replace the approval with a model-authored yes. Declining or timing out sends no new response from that approval.
+If you opted into `--approval prompt`, the host needs MCP elicitation support or the human needs access to the bridge's loopback browser page. Stderr distinguishes that wait from network delivery. A timed-out prompt sends no new action.
 
 ## A board is missing or moved
 

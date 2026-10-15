@@ -25,3 +25,18 @@ it("identifies truncated response streams as retryable", async () => {
   const client = new DossyClient({ networkUrl: "https://network.example.test", fetchImpl: async () => new Response(new ReadableStream({ start(controller) { controller.error(Object.assign(new Error("socket closed"), { code: "ECONNRESET" })); } })) });
   await expect(client.discover()).rejects.toMatchObject({ code: "unavailable", retryable: true, message: expect.stringContaining("ECONNRESET") });
 });
+
+it("bounds a fetch that never responds, even when a custom transport ignores abort", async () => {
+  let signal: AbortSignal | null | undefined;
+  const client = new DossyClient({ networkUrl: "https://network.example.test", requestTimeoutMs: 25, fetchImpl: async (_input, init) => {
+    signal = init?.signal;
+    return new Promise<Response>(() => {});
+  } });
+  await expect(client.discover()).rejects.toMatchObject({ code: "unavailable", retryable: true, message: expect.stringContaining("request timed out") });
+  expect(signal?.aborted).toBe(true);
+});
+
+it("includes body download in the HTTP deadline", async () => {
+  const client = new DossyClient({ networkUrl: "https://network.example.test", requestTimeoutMs: 25, fetchImpl: async () => new Response(new ReadableStream()) });
+  await expect(client.discover()).rejects.toMatchObject({ code: "unavailable", retryable: true, message: expect.stringContaining("after 0.025s") });
+});

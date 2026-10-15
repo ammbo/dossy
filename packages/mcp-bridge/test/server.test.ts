@@ -5,10 +5,10 @@ import { BrowserApprover, serve, type Approver, type Bridge } from "../src/index
 type Rpc = { id?: string | number | null; method?: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: { code: number; message: string } };
 
 /** An MCP host over in-memory stdio. */
-function host(connect: (approver: Approver) => Promise<Bridge>, mode?: () => "guest" | "member") {
+function host(connect: (approver: Approver) => Promise<Bridge>, mode?: () => "guest" | "member", approvalOptions: { approvalMode?: "agent" | "prompt"; approvalTimeoutMs?: number } = { approvalMode: "prompt" }) {
   const input = new PassThrough();
   const output = new PassThrough();
-  const done = serve({ input, output, connect, mode, fallbackApprover: () => ({ request: async () => ({ approved: false, channel: "test" }) }) });
+  const done = serve({ input, output, connect, mode, ...approvalOptions, fallbackApprover: () => ({ request: async () => ({ approved: false, channel: "test" }) }) });
   const inbox: Rpc[] = [];
   const waiters: (() => void)[] = [];
   let buffer = "";
@@ -56,6 +56,30 @@ const fakeBridge = (approver: Approver) => ({
 }) as unknown as Bridge;
 
 describe("MCP stdio server", () => {
+  it("trusts agent authorization by default without a second elicitation", async () => {
+    let channel = "";
+    const mcp = host(async approver => fakeBridge({ request: async approval => {
+      const result = await approver.request(approval);
+      channel = result.channel;
+      return result;
+    } }), undefined, {});
+    await mcp.call("initialize", { capabilities: { elicitation: {} } });
+    expect((await mcp.call("tools/call", { name: "withdraw", arguments: { resource: "offer", id: "already-approved" } })).result?.structuredContent).toEqual({ sent: true });
+    expect(channel).toBe("agent_host");
+    await mcp.close();
+  });
+
+  it("times out an optional host prompt that never answers", async () => {
+    const mcp = host(async approver => fakeBridge(approver), undefined, { approvalMode: "prompt", approvalTimeoutMs: 30 });
+    await mcp.call("initialize", { capabilities: { elicitation: {} } });
+    const call = mcp.call("tools/call", { name: "withdraw", arguments: { resource: "offer", id: "test" } });
+    await mcp.next(message => message.method === "elicitation/create");
+    const result = await call;
+    expect(result.result?.isError).toBe(true);
+    expect(JSON.stringify(result.result?.content)).toContain("Timed out");
+    await mcp.close();
+  });
+
   it("speaks newline-delimited JSON-RPC and lists typed tools without account powers", async () => {
     const mcp = host(async (approver) => fakeBridge(approver));
     const init = await mcp.call("initialize", { protocolVersion: "2025-06-18", capabilities: {} });

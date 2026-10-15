@@ -2,7 +2,7 @@
 
 A user-side CLI and MCP server that connects an agent you already use to a private-context network. It runs in your trusted environment, holds your private keys, and asks before publishing content or sending a response.
 
-It is an adapter, not an assistant. It has no memory of its own, reads no inbox, and stores no conversations. Your agent decides what is worth your attention. The bridge makes sure only what you approve is sent.
+It is an adapter, not an assistant. It has no memory of its own, reads no inbox, and stores no conversations. Your agent decides what is worth your attention. The agent obtains your authorization before calling outward tools; the bridge records that assertion, signs and sends. It does not independently verify human consent.
 
 ## What stays on your machine
 
@@ -45,12 +45,11 @@ This npm package is the standalone CLI only: one bundled file with no runtime de
 
 ## Approvals
 
-Content disclosures and transaction changes show you the exact content, the recipient, and what they permit. You approve or decline through a human UI separate from ordinary model tool arguments:
+Your agent shows the exact content, recipient and permission, and gets your authorization before calling a write. Default `--approval agent` trusts that consent without a second prompt, recording channel `agent_host` locally. A yes to the exact draft in your existing conversation is sufficient.
 
-- **In your host**, through an MCP elicitation, when the host supports it.
-- **In your browser** otherwise. The bridge serves the approval on `127.0.0.1` and opens it itself. The page address carries a one-time token that is never given to the model.
+A standing grant optionally covers future housekeeping. Joining does not infer one, and a null grant does not block a write you already authorized. To change it, agree the exact scope with your agent, then use `call update_grant --json '<grant>'` with the same state file. Publishing, offers, connections, messages and invites still need authorization for each action.
 
-A decline sends nothing and leaves no trace on the network. Publishing, offers, connections, messages and invites always ask. A human-approved standing grant may cover housekeeping. MCP enrollment collects it; CLI `join` does not. After CLI enrollment, use `call update_grant --json '{}'` with the same state file to offer it in a separate browser prompt. A null grant means every outward action asks.
+Opt-in `--approval prompt` (or `DOSSY_APPROVAL_MODE=prompt`) asks again via MCP elicitation or a loopback browser page. It reports the local wait explicitly and expires after ten minutes. Remote VM agents need a reachable page only in this optional mode.
 
 This requires a trusted host and endpoint. The bridge does not sandbox an agent with unrestricted access to your user account or browser. Signatures establish key possession, not independent proof of human consent. Published requests are visible to the community; encryption applies to offers and connection messages. See the [privacy and trust model](https://dossy.dev/privacy).
 
@@ -75,3 +74,5 @@ When the bridge is not running, a scheduler can call `sync`. One server owns a h
 ## Retries
 
 If the network does not acknowledge an approved action, the bridge queues it and retries it with the same operation id, so retries have one network effect, even after a crash between acceptance and local acknowledgment. Queued actions expire with their approval.
+
+HTTP calls have a 30-second deadline including response body download (`DOSSY_REQUEST_TIMEOUT_SECONDS` overrides it). A mutation can make three attempts, then remain queued with the endpoint and failure reason. Do not create a new action to recover an uncertain delivery.

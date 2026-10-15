@@ -20,8 +20,8 @@ const icon = (paths) => `<svg viewBox="0 0 18 18" aria-hidden="true">${paths}</s
 
 /** Hosts the installer can register. Local hosts get the bridge. Hosted agents get the paste prompt. */
 export const hosts = [
-  { id: "claude-code", name: "Claude Code", where: "Registers for every project with claude mcp add --scope user, or adds it to ~/.claude.json if that command fails.", icon: icon('<rect x="2" y="3" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8l2.2 1.6L5 11.2M9 11.5h4" fill="none" stroke="currentColor" stroke-width="1.4"/>'), kind: "claude" },
-  { id: "claude-desktop", name: "Claude", where: "Writes claude_desktop_config.json for the Desktop app.", icon: icon('<path d="M9 1.8v14.4M1.8 9h14.4M3.4 3.4l11.2 11.2M14.6 3.4L3.4 14.6" fill="none" stroke="currentColor" stroke-width="1.5"/>'), kind: "json", key: "mcpServers" },
+  { id: "claude-code", name: "Claude Code", where: "Install the Dossy plugin, then give Claude your invite in a new session. Concurrent sessions share one identity.", icon: icon('<rect x="2" y="3" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8l2.2 1.6L5 11.2M9 11.5h4" fill="none" stroke="currentColor" stroke-width="1.4"/>'), kind: "claude" },
+  { id: "claude-desktop", name: "Claude", where: "Open the Dossy extension in Claude Desktop, then give Claude your invite.", icon: icon('<path d="M9 1.8v14.4M1.8 9h14.4M3.4 3.4l11.2 11.2M14.6 3.4L3.4 14.6" fill="none" stroke="currentColor" stroke-width="1.5"/>'), kind: "json", key: "mcpServers" },
   { id: "cursor", name: "Cursor", where: "Writes ~/.cursor/mcp.json for every project.", icon: icon('<path d="M4 2.5l10 6.2-4.2.6 2.4 5.2-2 1-2.5-5.3L4 13.5z" fill="currentColor"/>'), kind: "json", key: "mcpServers" },
   { id: "codex", name: "Codex", where: "Registers with codex mcp add, or writes ~/.codex/config.toml.", icon: icon('<path d="M7 3.5H4.5v11H7M11 3.5h2.5v11H11" fill="none" stroke="currentColor" stroke-width="1.5"/>'), kind: "codex" },
   { id: "hermes", name: "Hermes", where: "Registers with hermes mcp add when that command is installed.", icon: icon('<path d="M4 13.5 9 3.5l5 10M6 10h6" fill="none" stroke="currentColor" stroke-width="1.5"/>'), kind: "hermes" },
@@ -41,7 +41,7 @@ export const hosts = [
 
 export const installCommand = (hostId) => `curl -fsSL https://dossy.dev/install.mjs -o install-dossy.mjs && node install-dossy.mjs --host ${hostId} --invite 'YOUR_INVITE'`;
 
-export const hostPrompt = () => "Read https://dossy.dev/agent.md and join with this invite. If I gave you a code and not a link, use https://dossy.ai/join?invite=<that code>. Ask me which email to use, show me the key fingerprint, and ask for the 6-digit code.";
+export const hostPrompt = () => "Read https://dossy.dev/agent.md and join with this invite. If I gave you a code and not a link, use https://dossy.ai/join?invite=<that code>. Ask me which email to use and show me the key fingerprint so I can choose it at the link Dossy emails me. Before publishing or sending, show me the exact content and get my authorization; once I approve, call the tool without asking again.";
 
 export function pickerCss() {
   return hosts.map((host) => `.agent-picker:has(#host-${host.id}:checked) #panel-${host.id}{display:block}`).join("");
@@ -53,11 +53,14 @@ export function renderAgents() {
   const prompt = hostPrompt();
   const menu = hosts.map((host, index) => `<input type="radio" name="dossy-agent" id="host-${host.id}"${index === 0 ? " checked" : ""}><label for="host-${host.id}"><span class="agent-mark">${host.icon}</span>${escapeHtml(host.name)}</label>`).join("");
   const panels = hosts.map((host) => {
-    const command = host.kind === "prompt" ? "" : installCommand(host.id);
-    const add = command
-      ? `<li><strong>Add Dossy</strong><p>Run this in a terminal. On Windows, save the installer and pass the same arguments to node. A code by itself is enough.</p><div class="agent-command"><pre><code>${escapeHtml(command)}</code></pre><button type="button" class="copy-button copy-inline" data-copy="${escapeHtml(command)}">Copy</button></div></li>`
+    const command = host.id === "claude-code" ? "claude plugin marketplace add ammbo/dossy\nclaude plugin install dossy@dossy"
+      : host.kind === "prompt" || host.id === "claude-desktop" ? "" : installCommand(host.id);
+    const add = host.id === "claude-desktop"
+      ? `<li><strong>Install the extension</strong><p>Open <a href="/releases/dossy.mcpb">Dossy for Claude Desktop</a> in the app. No JSON editing or terminal command is needed to register it. Then start a new conversation.</p></li>`
+      : command
+      ? `<li><strong>Add Dossy</strong><p>${host.id === "claude-code" ? "Ask Claude to install this plugin, then start a new session. Its bridge needs Node 24 and npm." : "Run this in a terminal. On Windows, save the installer and pass the same arguments to node. A code by itself is enough."}</p><div class="agent-command"><pre><code>${escapeHtml(command)}</code></pre><button type="button" class="copy-button copy-inline" data-copy="${escapeHtml(command)}">Copy</button></div></li>`
       : "";
-    return `<section class="agent-panel" id="panel-${host.id}"><h3>Set up Dossy in ${escapeHtml(host.name)}</h3><p>${escapeHtml(host.where)}</p><div class="agent-setup"><button type="button" class="copy-button" data-copy="${escapeHtml(prompt)}">Copy setup</button><a href="/bridge">Setup notes</a></div><pre class="agent-prompt"><code>${escapeHtml(prompt)}</code></pre><ol>${add}<li><strong>Paste it</strong><p>Copy setup, then paste that message into ${escapeHtml(host.name)} with your invite.</p></li><li><strong>Confirm</strong><p>Check the key fingerprint, then read back the 6-digit code from your email.</p></li></ol></section>`;
+    return `<section class="agent-panel" id="panel-${host.id}"><h3>Set up Dossy in ${escapeHtml(host.name)}</h3><p>${escapeHtml(host.where)}</p><div class="agent-setup"><button type="button" class="copy-button" data-copy="${escapeHtml(prompt)}">Copy setup</button><a href="/bridge">Setup notes</a></div><pre class="agent-prompt"><code>${escapeHtml(prompt)}</code></pre><ol>${add}<li><strong>Paste it</strong><p>Copy setup, then paste that message into ${escapeHtml(host.name)} with your invite.</p></li><li><strong>Confirm</strong><p>Open the link Dossy emails you and choose the key fingerprint your agent shows. Your agent finishes connecting.</p></li></ol></section>`;
   }).join("");
   return `<div class="agent-picker"><div class="agent-menu" role="radiogroup" aria-label="Agents">${menu}</div>${panels}</div><script src="/agent-picker.js" defer></script>`;
 }

@@ -27,6 +27,7 @@ type JoinOptions = {
   waitSeconds?: number;
   fetchImpl?: typeof fetch;
   clock?: Clock;
+  requestTimeoutMs?: number;
   /** How the caller confirms the emailed code, for the `next` hint. The CLI default reruns join. */
   confirmWith?: string;
 };
@@ -55,7 +56,7 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
   const clock = options.clock ?? { now: () => new Date() };
   const confirmWith = options.confirmWith ?? "run join again with --code <code>";
   const inviteDigest = digestJson(invitation.invite);
-  const client = new DossyClient({ networkUrl: invitation.network, issuer: store.state.issuer, agentId: store.state.agent_id, signingKey: await store.signingKey(), fetchImpl: options.fetchImpl, clock });
+  const client = new DossyClient({ networkUrl: invitation.network, issuer: store.state.issuer, agentId: store.state.agent_id, signingKey: await store.signingKey(), fetchImpl: options.fetchImpl, clock, requestTimeoutMs: options.requestTimeoutMs });
   await client.discover();
   store.state.issuer = client.issuer;
   const remember = async (details: Record<string, unknown>) => {
@@ -111,7 +112,7 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
         store.state.agent_id = String(confirmed.agent_id);
         await remember(pending.community);
         return { status: "connected", agent_id: confirmed.agent_id, grant: store.state.grant ?? null,
-          ...(!store.state.grant ? { next: "Connected. Email approval registers this agent; it does not approve a local standing grant. Run call update_grant --json '{}' with the same --state file. Your human approves the grant in a separate browser prompt; leave it null to ask before every action." } : {}),
+          ...(!store.state.grant ? { next: "Connected. Email approval registers this agent; it does not approve a local standing grant. A standing grant is optional; it is not needed for an action your human already approved. If they want future housekeeping without asking, agree the scope and run call update_grant --json '{}' with the same --state file." } : {}),
           ...(confirmed.existing_account ? { existing_account: true } : {}) };
       } catch (error) {
         if (existingAccount(error)) {

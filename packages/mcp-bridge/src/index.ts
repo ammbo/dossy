@@ -1,4 +1,4 @@
-export { BrowserApprover, ElicitationApprover, renderApproval, type ApprovalRequest, type ApprovalResult, type Approver } from "./approval.js";
+export { AgentHostApprover, ApprovalTimeoutError, BrowserApprover, ElicitationApprover, renderApproval, type ApprovalMode, type ApprovalRequest, type ApprovalResult, type Approver } from "./approval.js";
 export { Bridge, ToolError, untrusted } from "./bridge.js";
 export { defaultStatePath, Keystore, withStateSession, type BridgeState, type Receipt, type StandingGrant } from "./keystore.js";
 export { joinFromLink, parseJoinLink } from "./join.js";

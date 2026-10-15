@@ -18,14 +18,31 @@ export type ApprovalRequest = {
 /** `choice` is the human's answer to the approval's choice, when it has one and they approved. */
 export type ApprovalResult = { approved: boolean; channel: string; choice?: string };
 
+export type ApprovalMode = "agent" | "prompt";
+
+/** The trusted agent/host obtains consent before calling a tool. No second prompt is shown. */
+export class AgentHostApprover implements Approver {
+  async request(_approval: ApprovalRequest): Promise<ApprovalResult> {
+    return { approved: true, channel: "agent_host" };
+  }
+}
+
+export class ApprovalTimeoutError extends Error {
+  readonly code = "approval_timeout";
+  constructor(action: string, timeoutMs: number) {
+    super(`Timed out after ${timeoutMs / 1000}s waiting for human approval of ${action}. No new action was sent. The optional approval prompt must be reachable by the human; the default agent approval mode uses consent already obtained by the agent.`);
+  }
+}
+
 function chosen(approval: ApprovalRequest, value: unknown): string | undefined {
   if (!approval.choice) return undefined;
   return approval.choice.options.some((option) => option.value === value) ? String(value) : approval.choice.default;
 }
 
 /**
- * Collects a human decision outside the model. The bridge signs an action only after an approver
- * returns approved for that exact disclosure. A model cannot answer an approval itself.
+ * Supplies authorization for an exact disclosure. The bridge signs an action after an approver
+ * returns approved for that exact disclosure. The default trusts consent obtained by the agent's
+ * host; optional prompt mode asks again in a separate UI. Neither is independent proof of consent.
  */
 export interface Approver {
   request(approval: ApprovalRequest): Promise<ApprovalResult>;
@@ -88,8 +105,8 @@ type Pending = { approval: ApprovalRequest; nonce: string; resolve: (decision: {
 
 /**
  * Serves the approval on 127.0.0.1 and opens it in the user's browser. The page address carries a
- * 128-bit token that is never returned to the model, so the model cannot approve on the human's
- * behalf. Used when the host does not support elicitation.
+ * 128-bit token with a form nonce and origin checks. This optional prompt is not a sandbox against
+ * a process that can read the user's browser or terminal. Used in prompt mode without elicitation.
  *
  * While a decision is pending, the server and its timeout keep the process alive: a CLI command has
  * nothing else to wait on. Idle, the server lets the process exit.
@@ -106,13 +123,18 @@ export class BrowserApprover implements Approver {
   async request(approval: ApprovalRequest): Promise<ApprovalResult> {
     const server = await this.listen();
     const token = randomId();
-    const decision = new Promise<{ approved: boolean; choice?: string }>((resolve) => {
-      const timer = setTimeout(() => resolve({ approved: false }), this.options.timeoutMs ?? 10 * 60_000);
+    const timeoutMs = this.options.timeoutMs ?? 10 * 60_000;
+    const decision = new Promise<{ approved: boolean; choice?: string }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new ApprovalTimeoutError(approval.action, timeoutMs)), timeoutMs);
       this.pending.set(token, { approval, nonce: randomId(), resolve, settled: false, timer });
     });
     server.ref();
+    process.stderr.write(`dossy-bridge: Waiting for human approval of ${approval.action} in the local browser (up to ${timeoutMs / 1000}s). The write has not been sent. This page is on the bridge machine; a remote VM needs a reachable browser or forwarded port.\n`);
     try {
-      await (this.options.open ?? openInBrowser)(`${this.origin}/approve/${token}`);
+      // The approval deadline still applies if a custom browser launcher never resolves.
+      void (this.options.open ?? openInBrowser)(`${this.origin}/approve/${token}`).catch(() => {
+        process.stderr.write("dossy-bridge: Could not open the optional approval page. Check browser access on this machine.\n");
+      });
       return { ...(await decision), channel: "browser" };
     } finally {
       clearTimeout(this.pending.get(token)?.timer);
@@ -234,6 +256,9 @@ export async function openInBrowser(url: string): Promise<void> {
     child.on("spawn", () => {
       child.unref();
       resolve();
+    });
+    child.on("exit", (code) => {
+      if (code) process.stderr.write(`Browser launcher exited with status ${code}. Open ${url}\n`);
     });
   });
 }

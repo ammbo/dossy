@@ -57,12 +57,14 @@ describe("browser approvals from the CLI", () => {
     expect(JSON.parse(run.output.stdout)).toEqual({ approved: true, channel: "browser" });
   });
 
-  it("declines when nobody decides in time instead of exiting silently", async () => {
+  it("reports an explicit approval timeout when nobody decides", async () => {
     const started = Date.now();
     const run = launch(["test/fixtures/approve-once.ts", "400"]);
-    expect(await run.exit).toBe(0);
+    expect(await run.exit).toBe(1);
     expect(Date.now() - started).toBeGreaterThanOrEqual(400);
-    expect(JSON.parse(run.output.stdout)).toEqual({ approved: false, channel: "browser" });
+    expect(run.output.stderr).toContain("Waiting for human approval");
+    expect(run.output.stderr).toContain("Timed out after 0.4s");
+    expect(run.output.stdout).toBe("");
   });
 
   it("waits ten minutes by default", async () => {
@@ -70,14 +72,14 @@ describe("browser approvals from the CLI", () => {
     const approver = new BrowserApprover({ open: async () => {} });
     try {
       let settled = false;
-      const decision = approver.request(approval).finally(() => { settled = true; });
+      const decision = approver.request(approval).catch(error => error).finally(() => { settled = true; });
       const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve)); };
       await flush();
       await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
       await flush();
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
-      await expect(decision).resolves.toEqual({ approved: false, channel: "browser" });
+      await expect(decision).resolves.toMatchObject({ code: "approval_timeout" });
     } finally {
       vi.useRealTimers();
       await approver.close();

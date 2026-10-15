@@ -11,8 +11,8 @@ import { Keystore, trySyncLease } from "../src/keystore.js";
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 type Rpc = { id?: number | string; method?: string; result?: Record<string, any>; error?: unknown };
 
-function launch(args: string[]) {
-  const child = spawn(process.execPath, ["--import", "tsx", ...args], { cwd: packageDir, env: { ...process.env, DOSSY_BROWSER: "none" } });
+function launch(args: string[], env: Record<string, string> = {}) {
+  const child = spawn(process.execPath, ["--import", "tsx", ...args], { cwd: packageDir, env: { ...process.env, DOSSY_BROWSER: "none", ...env } });
   const inbox: Rpc[] = [];
   let stderr = "", stdout = "", buffer = "", id = 0;
   child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
@@ -50,7 +50,7 @@ async function until(test: () => boolean | Promise<boolean>, detail: () => strin
 }
 
 /** A wire stub: records physical sends and sync readers, rather than mocking process locks. */
-async function setup() {
+async function setup(options: { hangWrites?: boolean } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "dossy-concurrent-"));
   let origin = "", online = false, successfulSends = 0;
   const syncTokens: string[] = [];
@@ -67,6 +67,7 @@ async function setup() {
       return send({ mode: "feed", mutations: [], feed_cursor: "cursor" });
     }
     if (request.method === "POST" && request.url === "/v0.2/boards") {
+      if (options.hangWrites) return;
       if (!online) return send({ error: "unavailable", message: "Test outage" }, 503);
       successfulSends++;
       const envelope = JSON.parse(body).envelope as string;
@@ -94,7 +95,7 @@ async function setup() {
 
 it("three real serve processes share tools, follows, watches, CLI grants and one approved send", async () => {
   const env = await setup();
-  const sessions = Array.from({ length: 3 }, () => launch(["src/main.ts", "serve", "--state", env.path]));
+  const sessions = Array.from({ length: 3 }, () => launch(["src/main.ts", "serve", "--approval", "prompt", "--state", env.path]));
   try {
     await Promise.all(sessions.map(async session => {
       await session.call("initialize", { capabilities: { elicitation: {} } });
@@ -113,7 +114,7 @@ it("three real serve processes share tools, follows, watches, CLI grants and one
       expect(status.grant).toBeNull();
     }
     // CLI update_grant exists and persists only after a separate browser decision.
-    const grant = launch(["src/main.ts", "call", "update_grant", "--json", '{"standing_actions":[]}', "--state", env.path]);
+    const grant = launch(["src/main.ts", "call", "update_grant", "--approval", "prompt", "--json", '{"standing_actions":[]}', "--state", env.path]);
     await until(() => /Open (http:\/\/127\.0\.0\.1:\d+\/approve\/\S+)/.test(grant.stderr), () => grant.stderr);
     const url = /Open (http:\/\/127\.0\.0\.1:\d+\/approve\/\S+)/.exec(grant.stderr)![1]!;
     const page = await (await fetch(url)).text();
@@ -138,6 +139,36 @@ it("three real serve processes share tools, follows, watches, CLI grants and one
     expect(env.operationIds).toHaveLength(1);
     expect((await stat(env.path)).mode & 0o777).toBe(0o600);
   } finally { await Promise.all(sessions.map(session => session.close())); await env.close(); }
+});
+
+it("CLI writes with a null grant use agent authorization and show no second approval", async () => {
+  const env = await setup();
+  env.recover();
+  try {
+    const cli = launch(["src/main.ts", "call", "create_board", "--json", '{"board_id":"test.created","description":"Human already approved this board"}', "--state", env.path]);
+    expect(await cli.exit, cli.stderr).toBe(0);
+    expect(JSON.parse(cli.stdout)).toMatchObject({ sent: true, board_id: "test.created" });
+    expect(cli.stderr).not.toContain("Waiting for human approval");
+    expect(cli.stderr).not.toContain("/approve/");
+    expect(env.sends).toBe(1);
+    const state = (await Keystore.open(env.path)).state;
+    expect(state.grant).toBeUndefined();
+    expect(state.receipts).toHaveLength(1);
+    expect(state.receipts[0]).toMatchObject({ channel: "agent_host", approved: true });
+  } finally { await env.close(); }
+});
+
+it("a CLI write with a silent HTTP peer times out and remains queued with its operation ID", async () => {
+  const env = await setup({ hangWrites: true });
+  try {
+    const cli = launch(["src/main.ts", "call", "create_board", "--json", '{"board_id":"test.created","description":"Synthetic timeout"}', "--state", env.path], { DOSSY_REQUEST_TIMEOUT_SECONDS: "0.05" });
+    expect(await cli.exit, cli.stderr).toBe(0);
+    const result = JSON.parse(cli.stdout);
+    expect(result).toMatchObject({ sent: false, queued: true, note: expect.stringContaining("request timed out") });
+    expect(result.note).toContain("POST http://127.0.0.1:");
+    expect(result.note).toContain("/v0.2/boards");
+    expect((await Keystore.open(env.path)).state.outbox).toHaveLength(1);
+  } finally { await env.close(); }
 });
 
 it("only one server syncs, competing CLI sync skips, and SIGKILL hands the lease to a survivor", async () => {

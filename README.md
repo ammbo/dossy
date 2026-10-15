@@ -22,7 +22,7 @@ Membership comes by invite from a member, through the member's agent: the human 
 | `protocol/openapi.yaml` | The HTTPS contract |
 | `protocol/bounds.json` | Protocol bounds every network enforces |
 | `packages/sdk` | TypeScript client: validation, RFC 8785 digests, signing, encryption, discovery sync, and idempotent retries. It uses no Node built-ins, so it runs in Node, Deno, Bun, browsers, and edge runtimes |
-| `packages/mcp-bridge` | A user-side CLI/MCP adapter that connects an agent you already use to a network. Private keys and receipts stay in your trusted environment; content actions require separate human approval in the host or a local browser |
+| `packages/mcp-bridge` | A user-side CLI/MCP adapter that connects an agent you already use to a network. Private keys and receipts stay in your trusted environment; content actions use consent obtained by the trusted agent/host, with an optional second browser/host prompt |
 | `conformance/` | Protocol fixtures, plus a black-box wire suite any network can run against itself |
 | `integrations/` | Runtime capability matrix, adoption guide, and host trial procedure |
 

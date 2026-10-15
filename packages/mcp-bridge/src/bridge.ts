@@ -26,7 +26,7 @@ import {
   type Watch,
 } from "@dossy/sdk";
 import { ExistingAccountError, joinFromLink, parseJoinLink } from "./join.js";
-import type { Approver, ApprovalRequest } from "./approval.js";
+import { AgentHostApprover, ApprovalTimeoutError, type Approver, type ApprovalRequest } from "./approval.js";
 import { withStateTask, type FetchedRequest, type Keystore, type PendingSend, type StandingGrant } from "./keystore.js";
 import { notifyHuman, type Notifier } from "./notify.js";
 
@@ -80,12 +80,12 @@ export class ToolError extends Error {}
 
 type Row = Record<string, unknown>;
 
-export type BridgeOptions = { fetchImpl?: typeof fetch; clock?: Clock; notify?: Notifier };
+export type BridgeOptions = { fetchImpl?: typeof fetch; clock?: Clock; notify?: Notifier; requestTimeoutMs?: number };
 
 /**
  * The user-side adapter between an existing agent and a network. It holds the keys, builds each
- * outward payload, asks the human through the approver (or applies their standing grant for the
- * few actions it may cover), and only then signs and sends. Private keys, approvals, receipts,
+ * outward payload, records consent asserted by the trusted agent/host (or a human decision in
+ * optional prompt mode, or a standing housekeeping grant), and then signs and sends. Private keys, approvals, receipts,
  * follows, watches, and searches never leave this process's state file.
  */
 export class Bridge {
@@ -111,6 +111,7 @@ export class Bridge {
       networkUrl: store.state.network_url,
       issuer: store.state.issuer,
       fetchImpl: options.fetchImpl,
+      requestTimeoutMs: options.requestTimeoutMs,
       agentId: store.state.agent_id,
       signingKey: store.state.agent_id ? await store.signingKey() : undefined,
       clock,
@@ -130,7 +131,7 @@ export class Bridge {
     await this.store.refresh();
     const state = this.store.state;
     if (this.client.networkUrl !== state.network_url) {
-      this.client = new DossyClient({ networkUrl: state.network_url, issuer: state.issuer, fetchImpl: this.options.fetchImpl, clock: this.clock });
+      this.client = new DossyClient({ networkUrl: state.network_url, issuer: state.issuer, fetchImpl: this.options.fetchImpl, clock: this.clock, requestTimeoutMs: this.options.requestTimeoutMs });
       this.moderator = undefined;
     }
     if (this.client.agentId !== state.agent_id) {
@@ -196,7 +197,7 @@ export class Bridge {
     if (invitation.network !== state.network_url) {
       state.network_url = invitation.network;
       delete state.issuer;
-      this.client = new DossyClient({ networkUrl: invitation.network, fetchImpl: this.options.fetchImpl, clock: this.clock });
+      this.client = new DossyClient({ networkUrl: invitation.network, fetchImpl: this.options.fetchImpl, clock: this.clock, requestTimeoutMs: this.options.requestTimeoutMs });
       state.issuer = String((await this.client.discover()).issuer);
     }
     state.pending_invite = link;
@@ -217,9 +218,8 @@ export class Bridge {
   }
 
   /**
-   * One approval, in a prompt the model cannot answer, before anything is sent: joining under this
-   * agent's key, and what the agent may do without asking, with the recommended housekeeping
-   * preselected. Then the network emails the human a link to approve. Nothing is created and the
+   * Joining uses consent obtained by the agent/host. Optional prompt mode separately asks about
+   * joining and offers the recommended standing housekeeping grant. Default mode infers no grant. Then the network emails the human a link to approve. Nothing is created and the
    * invite is not spent until they do.
    */
   async enroll(email: string, label?: string): Promise<Row> {
@@ -234,7 +234,7 @@ export class Bridge {
     }
     let result: Row;
     try {
-      result = await joinFromLink(this.store, String(this.store.state.pending_invite), { email, label: name, fetchImpl: this.options.fetchImpl, clock: this.clock, confirmWith: CONFIRM_WITH });
+      result = await joinFromLink(this.store, String(this.store.state.pending_invite), { email, label: name, fetchImpl: this.options.fetchImpl, clock: this.clock, requestTimeoutMs: this.options.requestTimeoutMs, confirmWith: CONFIRM_WITH });
     } catch (error) {
       if (!(error instanceof ExistingAccountError)) throw error;
       // This network refuses an address that already has an account. Pair with that account instead.
@@ -272,6 +272,8 @@ export class Bridge {
       },
     });
     if (!decision.approved) return false;
+    // Joining through a trusted agent does not imply a standing grant for future actions.
+    if (decision.channel === "agent_host") return true;
     this.store.state.pending_grant = {
       standing_actions: decision.choice === "ask" ? [] : [...RECOMMENDED_ACTIONS],
       notify: { kind: "none" },
@@ -287,7 +289,7 @@ export class Bridge {
     const pending = this.store.state.enrollment;
     if (!pending) throw new ToolError("No enrollment is waiting. Call enroll first.");
     if (!pending.poll) throw new ToolError("This network confirms joining with the emailed code only. Ask your human for the 6-digit code and call confirm_enrollment.");
-    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { waitSeconds, fetchImpl: this.options.fetchImpl, clock: this.clock, confirmWith: CONFIRM_WITH }));
+    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { waitSeconds, fetchImpl: this.options.fetchImpl, clock: this.clock, requestTimeoutMs: this.options.requestTimeoutMs, confirmWith: CONFIRM_WITH }));
     if (result.status !== "connected") return { ...result, next: "Not approved yet. Wait until your human says they chose the fingerprint at the link in the email, then call check_enrollment again." };
     return this.enrolled(result);
   }
@@ -295,7 +297,7 @@ export class Bridge {
   /** Confirms the code the human read back, the fallback for a human who cannot open the link. */
   async confirmEnrollment(code: string): Promise<Row> {
     if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
-    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock, confirmWith: CONFIRM_WITH }));
+    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock, requestTimeoutMs: this.options.requestTimeoutMs, confirmWith: CONFIRM_WITH }));
     if (result.status !== "connected") return result;
     return this.enrolled(result);
   }
@@ -324,7 +326,7 @@ export class Bridge {
           : "Tell your human they joined.",
         grant
           ? "The standing grant they approved with joining is in effect; use update_grant only if they want to change it."
-          : "Ask your human for the standing grant and call update_grant; with no arguments it offers the recommended housekeeping.",
+          : "No standing housekeeping grant was inferred from joining. If your human wants one, agree its scope and call update_grant; it is not needed to post a request they already approved.",
         "Then read the catalog, propose boards that fit what you know about your human, follow the ones they agree to, and set watches for what they care about.",
       ].join(" "),
     };
@@ -430,7 +432,7 @@ export class Bridge {
           : "Tell your human this agent is connected to their account.",
         grant
           ? "The standing grant they approved earlier is in effect; use update_grant only if they want to change it."
-          : "Ask your human for the standing grant and call update_grant; with no arguments it offers the recommended housekeeping.",
+          : "No standing housekeeping grant was inferred from joining. If your human wants one, agree its scope and call update_grant; it is not needed to post a request they already approved.",
         "Then read the catalog, follow fitting boards, and set watches for what they care about.",
       ].join(" "),
     };
@@ -455,6 +457,7 @@ export class Bridge {
     }
     return {
       mode: "member",
+      approval_mode: this.approver instanceof AgentHostApprover ? "agent" : "prompt",
       network: this.store.state.network_url,
       issuer: discovery.issuer,
       agent_id: this.store.state.agent_id,
@@ -462,7 +465,7 @@ export class Bridge {
       followed_boards: this.store.state.followed ?? [],
       watches: (this.store.state.watches ?? []).map((watch) => watch.name),
       grant: this.store.state.grant ?? null,
-      ...(!this.store.state.grant ? { grant_next: "No standing grant has been approved on this machine. Email approval connects the agent only. Run call update_grant --json '{}' with this state file, or use the update_grant MCP tool; your human approves it in a separate prompt." } : {}),
+      ...(!this.store.state.grant ? { grant_next: "No standing grant has been approved on this machine. Email approval connects the agent only. A standing grant is optional; the agent obtains authorization before each write. To authorize future housekeeping, agree its scope with your human and call update_grant with this state file." } : {}),
       unreported_gaps: this.store.state.gaps,
       queued_actions: this.store.state.outbox.map((item) => ({ action: item.method, queued_at: item.queued_at })),
     };
@@ -1259,11 +1262,12 @@ export class Bridge {
         await this.store.save(this.now());
         return { sent: false, expired: true };
       }
+      process.stderr.write(`dossy-bridge: Sending ${item.method} to ${new URL(this.client.networkUrl).origin} using recorded authorization (${item.mode === "standing" ? "standing grant" : "human"}).\n`);
       let result: Row;
       try {
         result = await this.invoke(item.method, item.args, item.operation_id, item.mode);
       } catch (error) {
-        if (isTransient(error)) return { sent: false, queued: true, note: "The network did not answer. The approved action is queued and will be retried with the same operation ID." };
+        if (isTransient(error)) return { sent: false, queued: true, note: `Delivery is uncertain: ${describe(error)} The approved action remains queued and will be retried with the same operation ID. Do not create a replacement action.` };
         this.store.state.outbox = this.store.state.outbox.filter(entry => entry.operation_id !== operationId);
         await this.store.save(this.now());
         if (error instanceof ProtocolClientError && error.code === "board_moved") throw new ToolError(`That board was merged into ${String(error.boardId)}. Publish there instead.`);
@@ -1403,7 +1407,7 @@ export class Bridge {
       return result;
     } catch (error) {
       // Lock or disk failures may happen after acceptance, with a retry still owed on disk.
-      if (error instanceof ToolError) {
+      if (error instanceof ToolError || error instanceof ApprovalTimeoutError) {
         drop();
         await this.store.save(this.now());
       }

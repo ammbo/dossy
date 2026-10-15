@@ -79,6 +79,8 @@ export type ClientOptions = {
   agentId?: string;
   signingKey?: CryptoKey;
   clock?: Clock;
+  /** Deadline for the complete HTTP response, including its body. Default: 30 seconds. */
+  requestTimeoutMs?: number;
 };
 
 type EnvelopeInput = {
@@ -104,6 +106,7 @@ export class DossyClient {
   agentId?: string;
   signingKey?: CryptoKey;
   readonly clock: Clock;
+  readonly requestTimeoutMs: number;
   private accessTokenExpiresAt?: number;
 
   constructor(options: ClientOptions) {
@@ -115,6 +118,8 @@ export class DossyClient {
     this.agentId = options.agentId;
     this.signingKey = options.signingKey;
     this.clock = options.clock ?? new SystemClock();
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
+    if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) throw new Error("requestTimeoutMs must be a positive number.");
   }
 
   async discover(): Promise<Record<string, unknown>> {
@@ -703,13 +708,26 @@ export class DossyClient {
     const endpoint = `${method} ${url.origin}${url.pathname}`;
     let response: Response;
     let text: string;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      response = await this.fetchImpl(url.href, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          const error = new DOMException(`HTTP request exceeded ${this.requestTimeoutMs}ms`, "TimeoutError");
+          controller.abort(error);
+          reject(error);
+        }, this.requestTimeoutMs);
       });
-      text = await response.text();
+      const request = async () => {
+        const response = await this.fetchImpl(url.href, {
+          method,
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: controller.signal,
+        });
+        return { response, text: await response.text() };
+      };
+      ({ response, text } = await Promise.race([request(), deadline]));
     } catch (error) {
       const cause = error instanceof Error ? (error.cause ?? error) as { code?: unknown; name?: unknown } : {};
       const code = typeof cause.code === "string" && /^[A-Z0-9_]+$/.test(cause.code) ? cause.code : "network_error";
@@ -719,7 +737,9 @@ export class DossyClient {
         : cause.name === "AbortError" ? "request aborted"
         : code.includes("CERT") || code.includes("TLS") ? "TLS verification failed"
         : "connection or response stream failed";
-      throw new ProtocolClientError("unavailable", `${endpoint}: ${reason} (${code}); no complete HTTP response. Check connectivity and retry the same command with the same state file.`, 0, undefined, true);
+      throw new ProtocolClientError("unavailable", `${endpoint}: ${reason} (${code})${controller.signal.aborted ? ` after ${this.requestTimeoutMs / 1000}s` : ""}; no complete HTTP response. Check connectivity and retry the same command with the same state file.`, 0, undefined, true);
+    } finally {
+      clearTimeout(timer);
     }
     let parsed: Record<string, unknown> = {};
     try {

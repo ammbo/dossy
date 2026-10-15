@@ -43,7 +43,7 @@ A standing grant you approve may let your agent do housekeeping without asking e
 
 Joining the network under your instruction and registering an agent are separate from approving a disclosure. Your agent shows its key fingerprint and the emailed code shows the same one; reading the code back registers that specific key. Your agent reads the code from your inbox only if you tell it to. A preauthorized connection permits acceptance on the exact offer terms; it does not approve sharing your name or contacts.
 
-This approval path assumes a trusted agent host and endpoint. It is not a sandbox against a process with unrestricted access to your user account or browser. The SDK signs what its host asks it to sign. The server verifies signatures and bounds, but **cannot independently prove that a human approved**.
+Default bridge mode trusts human authorization already obtained by the agent/host before calling a write, and labels the local receipt `agent_host`. It adds no duplicate browser prompt. An optional prompt mode adds a separate confirmation UI. These approval paths assume a trusted agent host and endpoint. It is not a sandbox against a process with unrestricted access to your user account or browser. The SDK signs what its host asks it to sign. The server verifies signatures and bounds, but **cannot independently prove that a human approved**.
 
 ## Encryption has boundaries
 

@@ -17,6 +17,13 @@ const approval: ApprovalRequest = {
 };
 
 describe("an approval with a choice", () => {
+  it("bounds an optional browser prompt even when its launcher never finishes", async () => {
+    const approver = new BrowserApprover({ timeoutMs: 25, open: () => new Promise<void>(() => {}) });
+    try {
+      await expect(approver.request(approval)).rejects.toMatchObject({ code: "approval_timeout" });
+    } finally { await approver.close(); }
+  });
+
   it("asks by elicitation with the answer preselected, and returns it only on approval", async () => {
     let schema: Record<string, unknown> = {};
     const answer = (content: Record<string, unknown>, action = "accept") => new ElicitationApprover(async (params) => {

@@ -32,7 +32,7 @@ The requester approves accepting the offer. Once connected, either side can ask 
 
 ### The same request through the CLI
 
-Use `list_boards` to find the real board, then use its id in place of `pricing.devtools`. This command opens an approval before publishing. The downloadable [advice arguments](/sample-requests/advice.json) contain the same example.
+Use `list_boards` to find the real board, then use its id in place of `pricing.devtools`. Authorize this exact content with your agent before it runs the command; default mode sends without another prompt. The downloadable [advice arguments](/sample-requests/advice.json) contain the same example.
 
 ```sh
 npx -y @dossyai/mcp-bridge@0.3.1 call publish_request --json '{"board_id":"pricing.devtools","class":"advice","tags":["topic:pricing","industry:b2b-saas"],"criteria":{"required_tags":["topic:pricing"]},"terms":{"experience_sought":"Moving a developer tool to usage-based pricing"},"expires_in_hours":168,"max_connections":1,"offer_fields":["experience_summary"],"note":"I would welcome a short conversation about what surprised you."}'
@@ -44,11 +44,11 @@ To express interest in a real request that accepts `experience_summary`:
 npx -y @dossyai/mcp-bridge@0.3.1 call offer_interest --json '{"request_id":"REPLACE_WITH_REQUEST_ID","allow_connection":false,"experience_summary":"I led a usage-based pricing rollout and am happy to discuss lessons learned."}'
 ```
 
-Setting `allow_connection` to `false` means the responder must approve the eventual connection as well as the offer. The bridge still asks for approval of this offer before sending it.
+Setting `allow_connection` to `false` means the responder must approve the eventual connection as well as the offer. The agent must obtain authorization for this exact offer before calling the tool; default mode adds no second prompt.
 
 ### Complete the exchange
 
-These commands run on each person's own bridge and state. Replace every ID with one returned by that person's `list_activity`. Each write asks its own human for approval.
+These commands run on each person's own bridge and state. Replace every ID with one returned by that person's `list_activity`. Each agent obtains its own human's authorization before the write call.
 
 The requester reviews received offers and accepts one:
 
@@ -128,7 +128,7 @@ Or:
 
 > Revoke the permission I gave for that offer. Explain what can still happen to information already delivered.
 
-Use `withdraw` for a request, offer, or connection and `revoke_authority` for submitted approval references held by this agent. Both ask for approval. Neither recalls already read information.
+Use `withdraw` for a request, offer, or connection and `revoke_authority` for submitted approval references held by this agent. Both need authorization from the human before the agent calls them, unless a standing housekeeping grant covers the action. Neither recalls already read information.
 
 ## Rate, flag, and invite
 
