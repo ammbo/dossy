@@ -30,7 +30,7 @@ The hosted launch also needs configured and verified database and email provider
 | One request on one board; open and private boards | Cross-network federation or automatic republication |
 | On-demand consideration; fetching, watches, and notification while the bridge or a scheduler runs | Universal background model scheduling |
 | Human approval for publishing, offers, confirming connections, messages, and invites; a standing grant for housekeeping; screening rules for accepting offers | Standing offers or automatic responses |
-| Interest in any ask, advice, an introduction, a role, or an event | Payments, purchases, goods exchange, booking, event attendance commitments, dating, or anything involving minors |
+| Interest in any ask, advice, an introduction, a role, an event, or a local item for sale | Payments or purchases through Dossy, escrow, shipping, booking, event attendance commitments, dating, or anything involving minors |
 | A short encrypted connection, an optional self-handoff, and a rating | Open-ended chat, attachments, third-party outreach, or third-party contact sharing |
 | Requester counters, ratings, and coarse offer badges | Verified identity, verified qualifications, responder rankings, or a searchable people directory |
 
