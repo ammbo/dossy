@@ -4,7 +4,7 @@ import { hostname } from "node:os";
 import { DossyClient, ProtocolClientError } from "@dossy/sdk";
 import { BrowserApprover, openInBrowser } from "./approval.js";
 import { Bridge, DEFAULT_NETWORK } from "./bridge.js";
-import { defaultStatePath, Keystore, withStateSession } from "./keystore.js";
+import { defaultStatePath, expandHome, Keystore, withStateSession } from "./keystore.js";
 import { joinFromLink, parseJoinLink } from "./join.js";
 import { findTool, rejectSecretArguments, toolDefinitions } from "./tools.js";
 import { serve } from "./server.js";
@@ -43,7 +43,7 @@ async function exists(path: string): Promise<boolean> {
 
 async function main(): Promise<void> {
   const command = process.argv[2];
-  const path = flag("state") ?? defaultStatePath();
+  const path = expandHome(flag("state") ?? defaultStatePath());
   switch (command) {
     case "--version":
     case "version":
@@ -155,7 +155,7 @@ async function main(): Promise<void> {
   }
 }
 
-const statePath = flag("state") ?? defaultStatePath();
+const statePath = expandHome(flag("state") ?? defaultStatePath());
 const stateless = new Set(["tools", "--version", "version", "--help", "-h", "help"]);
 const run = !process.argv[2] || stateless.has(process.argv[2]) ? main() : withStateSession(statePath, main);
 run.catch((error: unknown) => {

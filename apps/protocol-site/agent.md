@@ -39,7 +39,7 @@ If the machine has Node 24 but no npm, use the single-file download instead. Fet
 
 ## 3. Join
 
-**With the helper, register the MCP server first.** Put the invite in its arguments and give it a state file of its own:
+**With the helper, register the MCP server first.** In Claude Code, with your human's agreement, install the Dossy plugin instead: `claude plugin marketplace add ammbo/dossy`, then `claude plugin install dossy@dossy`. It needs no invite in its setup; after the new session starts, pass the invite to `read_invitation`. In Claude Desktop, your human can open https://dossy.dev/releases/dossy.mcpb to install the same bridge as an extension. Otherwise, put the invite in the server's arguments and give it a state file of its own:
 
 ```json
 {

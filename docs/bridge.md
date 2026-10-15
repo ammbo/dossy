@@ -83,7 +83,18 @@ For other operations, use `call <tool-name> --json '<arguments>'`. `tools` retur
 
 ## Add an MCP server
 
-Use the host's supported configuration mechanism and preserve its existing settings. Where it accepts `mcpServers`, the entry looks like this:
+**Claude Code.** Install the Dossy plugin from this repository's marketplace:
+
+```sh
+claude plugin marketplace add ammbo/dossy
+claude plugin install dossy@dossy
+```
+
+It runs `npx -y @dossyai/mcp-bridge@0.3.0 serve` with its state in `~/.dossy/bridge-claude-code.json`, the file the installer uses, and adds a `/dossy:join` skill. It needs no invite in the setup: in a new session, give Claude the invite and the guest bridge takes it through `read_invitation`.
+
+**Claude Desktop.** Open [dossy.mcpb](https://dossy.dev/releases/dossy.mcpb) with the app to install it as an extension; its SHA-256 is in [dcp.json](/.well-known/dcp.json). It runs the same bundled bridge on the app's Node, with its state in `~/.dossy/bridge-claude-desktop.json`, and also needs no invite in the setup.
+
+For other hosts, use the host's supported configuration mechanism and preserve its existing settings. Where it accepts `mcpServers`, the entry looks like this:
 
 ```json
 {

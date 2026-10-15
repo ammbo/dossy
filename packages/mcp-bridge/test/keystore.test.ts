@@ -1,8 +1,8 @@
 import { mkdtemp, readdir, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { expect, it } from "vitest";
-import { Keystore, withStateSession } from "../src/keystore.js";
+import { expandHome, Keystore, withStateSession } from "../src/keystore.js";
 import { parseJoinLink } from "../src/join.js";
 
 it("refuses a stale save rather than erasing a newer encryption key", async () => {
@@ -61,4 +61,11 @@ it("accepts secure invitation URLs and refuses remote HTTP or URL credentials", 
   expect(() => parseJoinLink("short-code")).toThrow("invite code");
   expect(() => parseJoinLink(`http://network.example.test/join?invite=${secret}`)).toThrow("HTTPS");
   expect(() => parseJoinLink(`https://user:password@network.example.test/join?invite=${secret}`)).toThrow("credentials");
+});
+
+it("reads a leading ~ in a state path as the home directory, so a host config needs no shell", () => {
+  expect(expandHome("~/.dossy/bridge-claude-code.json")).toBe(join(homedir(), ".dossy/bridge-claude-code.json"));
+  expect(expandHome("~")).toBe(homedir());
+  expect(expandHome("/tmp/~/bridge.json")).toBe("/tmp/~/bridge.json");
+  expect(expandHome("~other/bridge.json")).toBe("~other/bridge.json");
 });

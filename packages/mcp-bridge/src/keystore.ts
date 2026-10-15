@@ -90,7 +90,13 @@ export type BridgeState = {
 const RECEIPT_LIMIT = 500;
 
 export function defaultStatePath(): string {
-  return process.env.DOSSY_BRIDGE_STATE ?? join(homedir(), ".dossy", "bridge.json");
+  return expandHome(process.env.DOSSY_BRIDGE_STATE ?? join(homedir(), ".dossy", "bridge.json"));
+}
+
+/** A leading `~` is the home directory, so a host's config can name a state file without a shell. */
+export function expandHome(path: string): string {
+  if (path === "~") return homedir();
+  return /^~[\\/]/.test(path) ? join(homedir(), path.slice(2)) : path;
 }
 
 /**

@@ -1,0 +1,15 @@
+{
+  "name": "dossy",
+  "description": "Dossy for Claude Code: join an invite-only network of boards through the agent you already use.",
+  "owner": {
+    "name": "Dossy",
+    "url": "https://dossy.dev"
+  },
+  "plugins": [
+    {
+      "name": "dossy",
+      "source": "./plugins/dossy",
+      "description": "Runs the Dossy bridge as an MCP server. It keeps this agent's keys, follows, and watches on this machine, and asks before anything is sent."
+    }
+  ]
+}

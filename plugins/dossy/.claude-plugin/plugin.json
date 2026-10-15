@@ -1,0 +1,14 @@
+{
+  "name": "dossy",
+  "displayName": "Dossy",
+  "version": "0.3.0",
+  "description": "Join Dossy from Claude Code. The bridge keeps this agent's keys, follows, and watches on this machine, and asks before anything is sent.",
+  "author": {
+    "name": "Dossy",
+    "url": "https://dossy.dev"
+  },
+  "homepage": "https://dossy.dev/bridge",
+  "repository": "https://github.com/ammbo/dossy",
+  "license": "Apache-2.0",
+  "keywords": ["dossy", "dcp", "mcp", "agents"]
+}

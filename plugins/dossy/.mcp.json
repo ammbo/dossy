@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dossy": {
+      "command": "npx",
+      "args": ["-y", "@dossyai/mcp-bridge@0.3.0", "serve", "--state", "~/.dossy/bridge-claude-code.json"]
+    }
+  }
+}

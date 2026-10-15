@@ -55,7 +55,16 @@ const pins = [...(await readFile(join(docs, "agent.md"), "utf8")).matchAll(/@dos
 assert.ok(pins.length > 0, "agent.md pins no bridge version");
 for (const pin of pins) assert.equal(pin, manifest.npm.version, `agent.md pins bridge ${pin}`);
 assert.match(await readFile(join(docs, "install.mjs"), "utf8"), new RegExp(`BRIDGE_VERSION = "${manifest.npm.version.replace(/\./g, "\\.")}"`), "install.mjs pins another bridge version");
-for (const artifact of [manifest.bridge, ...manifest.notices]) {
+// The Claude Code plugin and the Claude Desktop extension run the same release.
+const plugin = JSON.parse(await readFile(join(root, "plugins/dossy/.claude-plugin/plugin.json"), "utf8"));
+const pluginServer = JSON.parse(await readFile(join(root, "plugins/dossy/.mcp.json"), "utf8")).mcpServers.dossy;
+assert.equal(plugin.version, manifest.npm.version, "The Claude Code plugin's version is not the bridge release");
+assert.ok(pluginServer.args.includes(`${manifest.npm.package}@${manifest.npm.version}`), "The Claude Code plugin runs another bridge release");
+const marketplace = JSON.parse(await readFile(join(root, ".claude-plugin/marketplace.json"), "utf8"));
+assert.ok(marketplace.plugins.some((entry) => entry.name === plugin.name && entry.source === "./plugins/dossy"), "The marketplace does not list the plugin");
+const extension = JSON.parse(await readFile(join(root, "packages/mcp-bridge/mcpb/manifest.json"), "utf8"));
+assert.equal(extension.version, manifest.npm.version, "The Claude Desktop extension's version is not the bridge release");
+for (const artifact of [manifest.bridge, manifest.claude_desktop_extension, ...manifest.notices]) {
   const url = new URL(artifact.url);
   assert.equal(url.origin, "https://dossy.dev");
   const bytes = await readFile(await resolveRoute(docs, url.pathname));
