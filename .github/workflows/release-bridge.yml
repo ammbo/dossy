@@ -2,10 +2,9 @@ name: release-bridge
 # Publishes @dossyai/mcp-bridge to npm with provenance when a bridge-v<version> tag is pushed.
 # Run it by hand for a dry run that builds, tests, stages, and packs without publishing.
 #
-# Authentication: npm trusted publishing (OIDC). On npmjs.com, add this repository and
-# release-bridge.yml as the package's trusted publisher. npm only offers that once the package
-# exists, so the first release falls back to an NPM_TOKEN secret with publish rights on @dossyai.
-# Delete that secret after the trusted publisher is set.
+# Authentication: npm trusted publishing (OIDC), with no NPM_TOKEN secret.
+# Package settings must trust owner ammbo, repository dossy, workflow release-bridge.yml,
+# no environment, and allow direct npm publish (new configurations default to stage-only).
 on:
   push:
     tags: ["bridge-v*"]
@@ -17,18 +16,22 @@ permissions:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       # The pnpm version comes from packageManager in package.json.
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6.1.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
       # Trusted publishing needs npm 11.5.1 or newer.
-      - run: npm install -g npm@^11.5.1
+      - name: Set up npm for trusted publishing
+        run: |
+          npm install -g npm@^11.5.1
+          node --version
+          npm --version
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:packages
       - run: pnpm typecheck
@@ -44,6 +47,5 @@ jobs:
       - run: node scripts/stage-bridge.mjs
       - name: Publish
         working-directory: packages/mcp-bridge/dist/npm
-        run: npm publish --provenance --access public ${{ github.ref_type == 'tag' && ' ' || '--dry-run' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # npm otherwise hides a rejected OIDC exchange behind a generic ENEEDAUTH error.
+        run: npm publish --provenance --access public --loglevel verbose ${{ github.ref_type == 'tag' && ' ' || '--dry-run' }}

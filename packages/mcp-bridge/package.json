@@ -17,7 +17,7 @@
     "tsx": "^4.20.0"
   },
   "bin": {
-    "dossy-bridge": "./bin/dossy-bridge.mjs"
+    "dossy-bridge": "bin/dossy-bridge.mjs"
   },
   "devDependencies": {
     "@dossy/conformance": "workspace:*",

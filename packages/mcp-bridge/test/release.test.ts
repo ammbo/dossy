@@ -33,7 +33,7 @@ describe("bridge release", () => {
       name: "@dossyai/mcp-bridge",
       version: pkg.version,
       engines: { node: ">=24" },
-      bin: { "dossy-bridge": "./bin/dossy-bridge.mjs" },
+      bin: { "dossy-bridge": "bin/dossy-bridge.mjs" },
       repository: { url: "git+https://github.com/ammbo/dossy.git", directory: "packages/mcp-bridge" },
     });
     expect(manifest.dependencies).toBeUndefined();
