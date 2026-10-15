@@ -32,6 +32,8 @@ import { notifyHuman, type Notifier } from "./notify.js";
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
+/** Guest bridges confirm the emailed code with a tool, not by rerunning the CLI. */
+const CONFIRM_WITH = "call confirm_enrollment with it";
 
 /** Actions the network accepts under a standing grant. Anything else always asks the human. */
 export const GRANTABLE_ACTIONS = [
@@ -214,7 +216,7 @@ export class Bridge {
     }
     let result: Row;
     try {
-      result = await joinFromLink(this.store, String(this.store.state.pending_invite), { email, label: name, fetchImpl: this.options.fetchImpl, clock: this.clock });
+      result = await joinFromLink(this.store, String(this.store.state.pending_invite), { email, label: name, fetchImpl: this.options.fetchImpl, clock: this.clock, confirmWith: CONFIRM_WITH });
     } catch (error) {
       if (!(error instanceof ExistingAccountError)) throw error;
       // This network refuses an address that already has an account. Pair with that account instead.
@@ -227,9 +229,8 @@ export class Bridge {
       };
     }
     if (result.status === "connected") return this.enrolled(result);
-    return result.next && this.store.state.enrollment?.poll
-      ? { ...result, next: "Tell your human: Dossy emailed them a link. They open it and choose this agent's key fingerprint, shown above. Then call check_enrollment, which waits for their approval. If they cannot open links, they can read you the 6-digit code from the same email: call confirm_enrollment with it. Never open the link or read their inbox yourself unless they tell you to." }
-      : { ...result, next: "Show your human the key fingerprint above, then ask for the 6-digit code emailed to them and call confirm_enrollment with it. Read it from their inbox only if they tell you to." };
+    if (!this.store.state.enrollment?.poll) return result;
+    return { ...result, next: "Tell your human: Dossy emailed them a link. They open it and choose this agent's key fingerprint, shown above. Then call check_enrollment, which waits for their approval. If they cannot open links, they can read you the 6-digit code from the same email: call confirm_enrollment with it. Never open the link or read their inbox yourself unless they tell you to." };
   }
 
   private async approveJoining(email: string, label: string, fingerprint: string): Promise<boolean> {
@@ -268,7 +269,7 @@ export class Bridge {
     const pending = this.store.state.enrollment;
     if (!pending) throw new ToolError("No enrollment is waiting. Call enroll first.");
     if (!pending.poll) throw new ToolError("This network confirms joining with the emailed code only. Ask your human for the 6-digit code and call confirm_enrollment.");
-    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { waitSeconds, fetchImpl: this.options.fetchImpl, clock: this.clock }));
+    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { waitSeconds, fetchImpl: this.options.fetchImpl, clock: this.clock, confirmWith: CONFIRM_WITH }));
     if (result.status !== "connected") return { ...result, next: "Not approved yet. Wait until your human says they chose the fingerprint at the link in the email, then call check_enrollment again." };
     return this.enrolled(result);
   }
@@ -276,7 +277,7 @@ export class Bridge {
   /** Confirms the code the human read back, the fallback for a human who cannot open the link. */
   async confirmEnrollment(code: string): Promise<Row> {
     if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
-    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock }));
+    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock, confirmWith: CONFIRM_WITH }));
     if (result.status !== "connected") return result;
     return this.enrolled(result);
   }

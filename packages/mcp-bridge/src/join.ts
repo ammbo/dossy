@@ -19,8 +19,17 @@ export function parseJoinLink(link: string): { network: string; invite: string }
   return { network: url.origin, invite };
 }
 
-/** With no email or code, how long to wait for the human to approve the emailed link before answering pending. */
-type JoinOptions = { email?: string; code?: string; label?: string; waitSeconds?: number; fetchImpl?: typeof fetch; clock?: Clock };
+type JoinOptions = {
+  email?: string;
+  code?: string;
+  label?: string;
+  /** With no email or code, how long to wait for the human to approve the emailed link before answering pending. */
+  waitSeconds?: number;
+  fetchImpl?: typeof fetch;
+  clock?: Clock;
+  /** How the caller confirms the emailed code, for the `next` hint. The CLI default reruns join. */
+  confirmWith?: string;
+};
 
 /** The address already belongs to a member, so this agent pairs with their account instead. The invite is not spent. */
 export class ExistingAccountError extends Error {
@@ -43,6 +52,7 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
   const invitation = parseJoinLink(link);
   if (store.state.network_url !== invitation.network) throw new Error("This state belongs to another network. Use --state with a separate file for this network.");
   const clock = options.clock ?? { now: () => new Date() };
+  const confirmWith = options.confirmWith ?? "run join again with --code <code>";
   const inviteDigest = digestJson(invitation.invite);
   const client = new DossyClient({ networkUrl: invitation.network, issuer: store.state.issuer, agentId: store.state.agent_id, signingKey: await store.signingKey(), fetchImpl: options.fetchImpl, clock });
   await client.discover();
@@ -77,7 +87,7 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
         return {
           status: "code_required",
           key_fingerprint: pending.fingerprint,
-          next: "Ask your human for the 6-digit code emailed to them, then run join again with --code <code>. Read it from their inbox only if they tell you to.",
+          next: `Ask your human for the 6-digit code emailed to them, then ${confirmWith}. Read it from their inbox only if they tell you to.`,
         };
       }
       try {
@@ -147,8 +157,8 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
   return {
     ...shown,
     next: poll
-      ? `Tell your human: Dossy emailed ${options.email} a link. They open it and choose the key fingerprint ${String(started.key_fingerprint)}, the one you show them. Then run join again with the same link to finish. If they cannot open links, they can read you the 6-digit code from the same email instead: run join again with --code <code>. Never open the link yourself.`
-      : "Show your human the key fingerprint above, then ask for the 6-digit code emailed to them and run join again with --code <code>. Never ask for a password or sign-in token.",
+      ? `Tell your human: Dossy emailed ${options.email} a link. They open it and choose the key fingerprint ${String(started.key_fingerprint)}, the one you show them. Then run join again with the same link to finish. If they cannot open links, they can read you the 6-digit code from the same email instead: ${confirmWith}. Never open the link yourself.`
+      : `Show your human the key fingerprint above, then ask for the 6-digit code emailed to them and ${confirmWith}. Never ask for a password or sign-in token.`,
   };
 }
 

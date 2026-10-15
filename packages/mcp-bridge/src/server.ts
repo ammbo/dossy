@@ -2,6 +2,7 @@ import type { Readable, Writable } from "node:stream";
 import { BrowserApprover, ElicitationApprover, type Approver } from "./approval.js";
 import { Bridge, ToolError } from "./bridge.js";
 import { findTool, instructionsFor, rejectSecretArguments, toolsFor } from "./tools.js";
+import { VERSION } from "./version.js";
 
 // MCP over stdio: one JSON-RPC message per line, UTF-8, no embedded newlines.
 export const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26"];
@@ -79,7 +80,7 @@ export function serve(options: ServeOptions): Promise<void> {
         return {
           protocolVersion: SUPPORTED_VERSIONS.includes(requested) ? requested : SUPPORTED_VERSIONS[0],
           capabilities: { tools: { listChanged: true } },
-          serverInfo: { name: "dossy-mcp-bridge", version: "0.3.0" },
+          serverInfo: { name: "dossy-mcp-bridge", version: VERSION },
           instructions: instructionsFor(announced),
         };
       }

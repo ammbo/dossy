@@ -1,0 +1,49 @@
+name: release-bridge
+# Publishes @dossyai/mcp-bridge to npm with provenance when a bridge-v<version> tag is pushed.
+# Run it by hand for a dry run that builds, tests, stages, and packs without publishing.
+#
+# Authentication: npm trusted publishing (OIDC). On npmjs.com, add this repository and
+# release-bridge.yml as the package's trusted publisher. npm only offers that once the package
+# exists, so the first release falls back to an NPM_TOKEN secret with publish rights on @dossyai.
+# Delete that secret after the trusted publisher is set.
+on:
+  push:
+    tags: ["bridge-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The pnpm version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@^11.5.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Check the tag matches the package version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(node -p "require('./packages/mcp-bridge/package.json').version")
+          if [ "$GITHUB_REF_NAME" != "bridge-v$version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match @dossyai/mcp-bridge $version." >&2
+            exit 1
+          fi
+      - run: node scripts/stage-bridge.mjs
+      - name: Publish
+        working-directory: packages/mcp-bridge/dist/npm
+        run: npm publish --provenance --access public ${{ github.ref_type == 'tag' && ' ' || '--dry-run' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

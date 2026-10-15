@@ -1,20 +1,26 @@
 #!/usr/bin/env node
-// User-space installer. No shell execution, elevated privileges, source checkout, or npm login.
+// User-space installer. No shell, elevated privileges, source checkout, or npm login.
+// By default it downloads nothing: it points one agent host at the pinned npm release, which the
+// host runs through npx. --standalone downloads the verified single-file bridge instead.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const origin = "https://dossy.dev";
+
+/** The bridge release every host is pointed at. Never `latest`: an update is a new installer. */
+export const BRIDGE_VERSION = "0.3.0";
+export const BRIDGE_PACKAGE = `@dossyai/mcp-bridge@${BRIDGE_VERSION}`;
 
 const icon = (paths) => `<svg viewBox="0 0 18 18" aria-hidden="true">${paths}</svg>`;
 
 /** Hosts the installer can register. Local hosts get the bridge. Hosted agents get the paste prompt. */
 export const hosts = [
-  { id: "claude-code", name: "Claude Code", where: "Registers for every project with claude mcp add --scope user.", icon: icon('<rect x="2" y="3" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8l2.2 1.6L5 11.2M9 11.5h4" fill="none" stroke="currentColor" stroke-width="1.4"/>'), kind: "claude" },
+  { id: "claude-code", name: "Claude Code", where: "Registers for every project with claude mcp add --scope user, or adds it to ~/.claude.json if that command fails.", icon: icon('<rect x="2" y="3" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8l2.2 1.6L5 11.2M9 11.5h4" fill="none" stroke="currentColor" stroke-width="1.4"/>'), kind: "claude" },
   { id: "claude-desktop", name: "Claude", where: "Writes claude_desktop_config.json for the Desktop app.", icon: icon('<path d="M9 1.8v14.4M1.8 9h14.4M3.4 3.4l11.2 11.2M14.6 3.4L3.4 14.6" fill="none" stroke="currentColor" stroke-width="1.5"/>'), kind: "json", key: "mcpServers" },
   { id: "cursor", name: "Cursor", where: "Writes ~/.cursor/mcp.json for every project.", icon: icon('<path d="M4 2.5l10 6.2-4.2.6 2.4 5.2-2 1-2.5-5.3L4 13.5z" fill="currentColor"/>'), kind: "json", key: "mcpServers" },
   { id: "codex", name: "Codex", where: "Registers with codex mcp add, or writes ~/.codex/config.toml.", icon: icon('<path d="M7 3.5H4.5v11H7M11 3.5h2.5v11H11" fill="none" stroke="currentColor" stroke-width="1.5"/>'), kind: "codex" },
@@ -79,8 +85,52 @@ export function assertInvite(invite) {
   return invite;
 }
 
-export function serverEntry(nodePath, bridgePath, invite, statePath) {
-  return { command: nodePath, args: [bridgePath, "serve", "--invite", invite], env: { DOSSY_BRIDGE_STATE: statePath } };
+/**
+ * Where this Node lives, as a host config should name it. Package managers resolve Node into
+ * versioned folders (Homebrew's Cellar) that an upgrade removes, so a PATH folder whose node is
+ * this same Node wins. PATH for the server puts that folder first, ahead of the rest of this PATH.
+ */
+export function nodeHome({ nodePath, platform = process.platform, env = process.env, realpath = realpathSync }) {
+  const path = platform === "win32" ? win32 : posix;
+  const delimiter = platform === "win32" ? ";" : ":";
+  const search = String(env.PATH ?? env.Path ?? "").split(delimiter).filter(Boolean);
+  const same = (a, b) => {
+    try {
+      return realpath(a) === realpath(b);
+    } catch {
+      return false;
+    }
+  };
+  const name = path.basename(nodePath);
+  const dir = search.find((folder) => same(path.join(folder, name), nodePath)) ?? path.dirname(nodePath);
+  return { dir, node: path.join(dir, name), PATH: [...new Set([dir, ...search])].join(delimiter) };
+}
+
+/**
+ * How a host starts the bridge: the pinned npm release through npx. The config names the npx
+ * beside this Node (24 or newer) and puts that Node first on PATH, because desktop hosts often
+ * start servers without the shell's PATH and the package's bin runs `env node`.
+ * Returns undefined when this Node has no npx beside it.
+ */
+export function npxLauncher({ nodePath, platform = process.platform, env = process.env, exists = existsSync, realpath = realpathSync }) {
+  const path = platform === "win32" ? win32 : posix;
+  const home = nodeHome({ nodePath, platform, env, realpath });
+  if (platform === "win32") {
+    // npx.cmd needs a shell to start, so Node runs npx's own script.
+    const cli = path.join(home.dir, "node_modules", "npm", "bin", "npx-cli.js");
+    return exists(cli) ? { command: home.node, args: [cli, "-y", BRIDGE_PACKAGE], env: { PATH: home.PATH } } : undefined;
+  }
+  const npx = path.join(home.dir, "npx");
+  return exists(npx) ? { command: npx, args: ["-y", BRIDGE_PACKAGE], env: { PATH: home.PATH } } : undefined;
+}
+
+/** How a host starts the verified single-file download. */
+export function standaloneLauncher(nodePath, bridgePath) {
+  return { command: nodePath, args: [bridgePath], env: {} };
+}
+
+export function serverEntry(launch, invite, statePath) {
+  return { command: launch.command, args: [...launch.args, "serve", ...(invite ? ["--invite", invite] : [])], env: { ...launch.env, DOSSY_BRIDGE_STATE: statePath } };
 }
 
 /** Merge one stdio server into a JSON config. Other servers and extra fields on this server stay. */
@@ -102,7 +152,8 @@ export function tomlString(value) {
 
 export function codexBlock(entry) {
   const args = entry.args.map((arg) => tomlString(arg)).join(", ");
-  return `[mcp_servers.dossy]\ncommand = ${tomlString(entry.command)}\nargs = [${args}]\ntool_timeout_sec = 600\n\n[mcp_servers.dossy.env]\nDOSSY_BRIDGE_STATE = ${tomlString(entry.env.DOSSY_BRIDGE_STATE)}\n`;
+  const env = Object.entries(entry.env).map(([name, value]) => `${name} = ${tomlString(value)}\n`).join("");
+  return `[mcp_servers.dossy]\ncommand = ${tomlString(entry.command)}\nargs = [${args}]\ntool_timeout_sec = 600\n\n[mcp_servers.dossy.env]\n${env}`;
 }
 
 /** Append the Codex table when it is absent. An existing table is left untouched. */
@@ -127,11 +178,16 @@ export function configFile(host, home, platform, env = {}) {
   return undefined;
 }
 
+/** Claude Code's user config. CLAUDE_CONFIG_DIR moves it. */
+export function claudeCodeConfig(home, env = {}) {
+  return env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, ".claude.json") : join(home, ".claude.json");
+}
+
 function runCommand(file, args, run) {
   if (run) return run(file, args);
   const result = spawnSync(file, args, { encoding: "utf8", timeout: 30_000 });
   if (result.error?.code === "ENOENT") return { missing: true, status: 1, stderr: "" };
-  return { missing: false, status: result.status ?? 1, stderr: String(result.stderr ?? "").slice(0, 500) };
+  return { missing: false, status: result.status ?? 1, stderr: String(result.stderr ?? result.error?.message ?? "").slice(0, 500) };
 }
 
 async function writePrivate(path, text) {
@@ -142,89 +198,123 @@ async function writePrivate(path, text) {
   await chmod(path, 0o600);
 }
 
+async function readOptional(path) {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+/** Saves the current contents beside the file before the installer changes it. */
+async function backUp(path, text, now = new Date()) {
+  const backup = `${path}.${now.toISOString().replace(/[:.]/g, "-")}.dossy-backup`;
+  await writeFile(backup, text, { mode: 0o600, flag: "wx" });
+  return backup;
+}
+
 /**
- * Point one host at the installed bridge. A JSON config is merged. Claude Code and Codex use
- * their own CLIs when those commands exist, so this does not rewrite their files by hand.
+ * Adds the dossy server to a JSON config and keeps everything else in it. An existing file is
+ * backed up first. A file that is not plain JSON is left alone, and so is a missing one unless
+ * `create` is set.
  */
-export async function registerHost({ host: hostId, invite, bridgePath, nodePath, home, platform = process.platform, env = process.env, run }) {
+export async function mergeJsonFile(path, key, entry, { create = true, now } = {}) {
+  const existing = await readOptional(path);
+  if (existing === undefined && !create) return { updated: false, reason: `${path} does not exist.` };
+  let next;
+  try {
+    next = mergeServerJson(existing ?? "", key, entry);
+  } catch {
+    return { updated: false, reason: `${path} is not plain JSON, so it was left unchanged.` };
+  }
+  const backup = existing === undefined ? undefined : await backUp(path, existing, now);
+  await writePrivate(path, next);
+  return { updated: true, ...(backup ? { backup } : {}) };
+}
+
+const jsonSnippet = (key, entry) => `${JSON.stringify({ [key]: { dossy: entry } }, null, 2)}\n`;
+
+/**
+ * Point one host at the bridge. A JSON config is merged, after a backup. Claude Code and Codex use
+ * their own CLIs when those work. When they do not, the installer edits their config file itself,
+ * or prints the exact entry to add.
+ */
+export async function registerHost({ host: hostId, invite, launch, home, platform = process.platform, env = process.env, run, now }) {
   const host = hosts.find((item) => item.id === hostId);
   if (!host) throw new Error(`Unknown host "${hostId}". Known hosts: ${hosts.map((item) => item.id).join(", ")}.`);
   invite = normalizeInvite(invite);
   const statePath = join(home, ".dossy", `bridge-${host.id}.json`);
-  const entry = serverEntry(nodePath, bridgePath, invite, statePath);
+  const entry = serverEntry(launch, invite, statePath);
   const base = { host: host.id, name: host.name, state: statePath, prompt: hostPrompt(host) };
+  const envFlags = (flag) => Object.entries(entry.env).flatMap(([name, value]) => [flag, `${name}=${value}`]);
 
   if (host.kind === "prompt") return { ...base, registered: false, promptOnly: true, config: null };
 
-  if (host.kind === "print") {
-    return { ...base, registered: false, config: null, snippet: `${JSON.stringify({ mcpServers: { dossy: entry } }, null, 2)}\n` };
-  }
+  if (host.kind === "print") return { ...base, registered: false, config: null, snippet: jsonSnippet("mcpServers", entry) };
 
   if (host.kind === "hermes" || host.kind === "openclaw") {
-    const file = host.kind === "hermes" ? "hermes" : "openclaw";
-    const values = [bridgePath, "serve", "--invite", invite];
+    const file = host.kind;
     const flag = host.kind === "hermes" ? "--args" : "--arg";
-    const args = ["mcp", "add", "--command", nodePath, ...values.flatMap((value) => [`${flag}=${value}`]), `--env=DOSSY_BRIDGE_STATE=${statePath}`, "dossy"];
+    const args = ["mcp", "add", "--command", entry.command, ...entry.args.map((value) => `${flag}=${value}`), ...Object.entries(entry.env).map(([name, value]) => `--env=${name}=${value}`), "dossy"];
     const result = runCommand(file, args, run);
-    return { ...base, registered: result.status === 0, config: null, command: [file, ...args], detail: result.missing ? `The ${file} command is not installed. Paste the setup into ${host.name} instead.` : result.stderr };
+    if (result.status === 0) return { ...base, registered: true, config: null, command: [file, ...args] };
+    const why = result.missing ? `The ${file} command is not installed.` : `${file} mcp add failed.${result.stderr ? ` ${result.stderr.trim()}` : ""}`;
+    return { ...base, registered: false, config: null, command: [file, ...args], snippet: jsonSnippet("mcpServers", entry), detail: `${why} Add the snippet as an MCP server in ${host.name}'s settings, or paste the setup into ${host.name} instead.` };
   }
 
   if (host.kind === "claude") {
-    const args = ["mcp", "add", "--scope", "user", "--transport", "stdio", "--env", `DOSSY_BRIDGE_STATE=${statePath}`, "dossy", "--", nodePath, bridgePath, "serve", "--invite", invite];
+    const args = ["mcp", "add", "--scope", "user", "--transport", "stdio", ...envFlags("--env"), "dossy", "--", entry.command, ...entry.args];
     const result = runCommand("claude", args, run);
-    return { ...base, registered: result.status === 0, config: join(home, ".claude.json"), command: ["claude", ...args], detail: result.missing ? "The claude command is not installed." : result.stderr };
+    const file = claudeCodeConfig(home, env);
+    if (result.status === 0) return { ...base, registered: true, config: file, command: ["claude", ...args] };
+    // A missing or crashing claude CLI should not end setup: user-scope servers live in this file.
+    const why = result.missing ? "The claude command is not installed." : `claude mcp add failed.${result.stderr ? ` ${result.stderr.trim()}` : ""}`;
+    const server = { type: "stdio", ...entry };
+    const written = await mergeJsonFile(file, "mcpServers", server, { create: false, now });
+    if (written.updated) {
+      return { ...base, registered: true, config: file, backup: written.backup, command: ["claude", ...args], detail: `${why} The installer added the dossy server to ${file} itself and saved the previous file as ${written.backup}. Quit any running Claude Code session first if /mcp does not list dossy in a new one.` };
+    }
+    return { ...base, registered: false, config: file, command: ["claude", ...args], snippet: jsonSnippet("mcpServers", server), detail: `${why} ${written.reason} Add the snippet to "mcpServers" at the top level of ${file}, or run the command once claude works.` };
   }
 
   if (host.kind === "codex") {
-    const args = ["mcp", "add", "--env", `DOSSY_BRIDGE_STATE=${statePath}`, "dossy", "--", nodePath, bridgePath, "serve", "--invite", invite];
+    const args = ["mcp", "add", ...envFlags("--env"), "dossy", "--", entry.command, ...entry.args];
     const result = runCommand("codex", args, run);
     const file = configFile(host, home, platform, env);
     if (result.status === 0) return { ...base, registered: true, config: file, command: ["codex", ...args] };
-    let existing = "";
-    try {
-      existing = await readFile(file, "utf8");
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-    const next = upsertCodex(existing, codexBlock(entry));
-    if (!next.updated) return { ...base, registered: false, config: file, detail: "Codex already has [mcp_servers.dossy]. The installer left that table as it is." };
+    const block = codexBlock(entry);
+    const existing = (await readOptional(file)) ?? "";
+    const next = upsertCodex(existing, block);
+    if (!next.updated) return { ...base, registered: false, config: file, snippet: block, detail: `Codex already has [mcp_servers.dossy], so the installer left ${file} as it is. Replace that table with the snippet to use this setup.` };
+    const backup = existing ? await backUp(file, existing, now) : undefined;
     await writePrivate(file, next.text);
-    return { ...base, registered: true, config: file, detail: result.missing ? "codex was not on PATH, so the installer wrote config.toml." : result.stderr };
+    return { ...base, registered: true, config: file, ...(backup ? { backup } : {}), detail: result.missing ? "codex was not on PATH, so the installer wrote config.toml." : `codex mcp add failed, so the installer wrote config.toml.${result.stderr ? ` ${result.stderr.trim()}` : ""}` };
   }
 
   const file = configFile(host, home, platform, env);
-  let existing = "";
-  try {
-    existing = await readFile(file, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  let next;
-  try {
-    next = mergeServerJson(existing, host.key, entry);
-  } catch {
-    return { ...base, registered: false, config: file, detail: `${file} is not plain JSON, so it was left unchanged.`, snippet: `${JSON.stringify({ [host.key]: { dossy: entry } }, null, 2)}\n` };
-  }
-  await writePrivate(file, next);
-  return { ...base, registered: true, config: file };
+  const written = await mergeJsonFile(file, host.key, entry, { now });
+  if (!written.updated) return { ...base, registered: false, config: file, detail: written.reason, snippet: jsonSnippet(host.key, entry) };
+  return { ...base, registered: true, config: file, ...(written.backup ? { backup: written.backup } : {}) };
 }
 
 function parseArgs(argv) {
   let host;
   let invite;
+  let standalone = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--help" || arg === "-h") return { help: true };
     if (arg === "--host") host = argv[++index];
     else if (arg === "--invite") invite = argv[++index];
-    else throw new Error(`Unknown argument ${arg}. Use --host <${hosts.map((item) => item.id).join("|")}> --invite <https-link>.`);
+    else if (arg === "--standalone") standalone = true;
+    else throw new Error(`Unknown argument ${arg}. Use --host <${hosts.map((item) => item.id).join("|")}> --invite <https-link> [--standalone].`);
   }
   if ((host === undefined && argv.includes("--host")) || (invite === undefined && argv.includes("--invite"))) throw new Error("--host and --invite each need a value.");
-  return { host, invite };
+  return { host, invite, standalone };
 }
 
 async function installBridge() {
-  if (Number(process.versions.node.split(".")[0]) < 24) throw new Error("Install Node.js 24 or newer from nodejs.org, then run this installer again.");
   const response = await fetch(`${origin}/.well-known/dcp.json`, { signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error("Could not fetch the DCP installation manifest.");
   const manifest = await response.json();
@@ -249,22 +339,32 @@ async function installBridge() {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
-    console.log(`Install the Dossy bridge, and optionally register it with one agent host.\n\nnode install.mjs [--host ${hosts.map((item) => item.id).join("|")}] [--invite <https-link>]\n\nOn Windows, save this file and pass the same flags to node. The curl one-liner is for macOS and Linux.`);
+    console.log(`Point one agent host at the Dossy bridge (${BRIDGE_PACKAGE}, run through npx).\n\nnode install.mjs [--host ${hosts.map((item) => item.id).join("|")}] [--invite <https-link>] [--standalone]\n\n--standalone downloads the single-file bridge from dossy.dev, checks its SHA-256, and points the host at it instead of npx.\nWithout --host, it prints an mcpServers entry. On Windows, save this file and pass the same flags to node.`);
     return;
   }
+  if (Number(process.versions.node.split(".")[0]) < 24) throw new Error("Install Node.js 24 or newer from nodejs.org, then run this installer again.");
   if (options.host && !hosts.some((item) => item.id === options.host)) throw new Error(`Unknown host "${options.host}". Known hosts: ${hosts.map((item) => item.id).join(", ")}.`);
   if (options.host && !options.invite) throw new Error("--host needs --invite, the https link a member sent you.");
   if (options.invite) options.invite = normalizeInvite(options.invite);
-  const installed = await installBridge();
-  const result = { installed, node: process.execPath };
-  if (!options.host) {
-    result.next = "Run again with --host <host> --invite <https-link>, or add this file to your MCP setup with serve --invite <invite-url>.";
+  const result = { node: process.execPath };
+  let launch;
+  if (options.standalone) {
+    result.installed = await installBridge();
+    launch = standaloneLauncher(nodeHome({ nodePath: process.execPath }).node, result.installed);
   } else {
-    const registration = await registerHost({ host: options.host, invite: options.invite, bridgePath: installed, nodePath: process.execPath, home: homedir() });
+    launch = npxLauncher({ nodePath: process.execPath });
+    if (!launch) throw new Error(`npx was not found beside ${process.execPath}. Install npm with this Node, or run again with --standalone to download the verified single-file bridge instead.`);
+    result.package = BRIDGE_PACKAGE;
+  }
+  if (!options.host) {
+    result.snippet = jsonSnippet("mcpServers", serverEntry(launch, options.invite, join(homedir(), ".dossy", "bridge.json")));
+    result.next = "Add this entry to your host's MCP servers, or run again with --host <host> --invite <https-link>.";
+  } else {
+    const registration = await registerHost({ host: options.host, invite: options.invite, launch, home: homedir() });
     Object.assign(result, registration);
     result.next = registration.registered
-      ? `Restart ${registration.name}. The invite in its setup is spent once you confirm the emailed code. Then paste the prompt to that agent.`
-      : registration.detail ?? "The bridge is installed. Registration did not change the host config.";
+      ? `Start a new ${registration.name} session, or restart ${registration.name}, so it loads the Dossy server. Then paste the prompt. The invite in the setup is spent once you confirm the emailed code.`
+      : registration.detail ?? "Registration did not change the host config.";
   }
   console.log(JSON.stringify(result, null, 2));
   if (result.registered === false && !result.promptOnly) process.exitCode = 1;

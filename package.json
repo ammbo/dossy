@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@dossy/conformance": "workspace:*",
-    "@dossy/mcp-bridge": "workspace:*",
+    "@dossyai/mcp-bridge": "workspace:*",
     "@dossy/protocol": "workspace:*",
     "@dossy/sdk": "workspace:*",
     "@types/node": "^24.0.0",

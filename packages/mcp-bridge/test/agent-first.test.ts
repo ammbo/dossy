@@ -78,7 +78,13 @@ suite("agent-first bridge", () => {
     await expect(bridge.catalog()).resolves.toMatchObject({ boards: expect.any(Array) });
     await expect(bridge.publishRequest({ board_id: "x", class: "general", tags: [], criteria: {}, terms: { ask: "?" } })).rejects.toThrow(/enrollment/);
     const email = `guest-${tag()}@example.test`;
-    expect(await bridge.enroll(email, "Claude Code")).toMatchObject({ status: "code_sent", key_fingerprint: read.key_fingerprint });
+    const sent = await bridge.enroll(email, "Claude Code");
+    expect(sent).toMatchObject({ status: "code_sent", key_fingerprint: read.key_fingerprint, next: expect.stringContaining("call confirm_enrollment") });
+    expect(String(sent.next)).not.toContain("--code");
+    // Enrolling again while the email is pending sends nothing new and points at the same tools.
+    const again = await bridge.enroll(email);
+    expect(again).toMatchObject({ status: "pending", next: expect.stringContaining("check_enrollment") });
+    expect(String(again.next)).toContain("call confirm_enrollment");
     const code = String(await target!.latestCode!(email));
     const joined = await bridge.confirmEnrollment(code);
     expect(joined).toMatchObject({ status: "connected", next: expect.stringContaining("update_grant") });

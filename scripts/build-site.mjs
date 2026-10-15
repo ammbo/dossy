@@ -60,5 +60,8 @@ for (const folder of ["protocol", "packages/sdk", "packages/mcp-bridge"]) execFi
 const artifact = async (file) => ({ url: `https://dossy.dev/releases/${file}`, sha256: createHash("sha256").update(await readFile(join(releases, file))).digest("hex") });
 await mkdir(join(docs, ".well-known"), { recursive: true });
 const { protocol } = JSON.parse(await readFile(join(root, "protocol/bounds.json"), "utf8"));
-await writeFile(join(docs, ".well-known/dcp.json"), JSON.stringify({ protocol, status: "draft", license: "Apache-2.0", instructions: "https://dossy.dev/agent.md", installer: "https://dossy.dev/install.mjs", minimum_node_major: 24, bridge: await artifact("dossy-bridge.mjs"), notices: await Promise.all([artifact("LICENSE.md"), artifact("THIRD_PARTY_NOTICES.md")]), network_discovery_path: "/.well-known/dcp", source: "https://github.com/ammbo/dossy" }, null, 2));
+const bridgePackage = JSON.parse(await readFile(join(root, "packages/mcp-bridge/package.json"), "utf8"));
+// The npm release is the default way to run the bridge; the hashed download below is the fallback.
+const npm = { package: bridgePackage.name, version: bridgePackage.version, run: `npx -y ${bridgePackage.name}@${bridgePackage.version}` };
+await writeFile(join(docs, ".well-known/dcp.json"), JSON.stringify({ protocol, status: "draft", license: "Apache-2.0", instructions: "https://dossy.dev/agent.md", installer: "https://dossy.dev/install.mjs", minimum_node_major: 24, npm, bridge: await artifact("dossy-bridge.mjs"), notices: await Promise.all([artifact("LICENSE.md"), artifact("THIRD_PARTY_NOTICES.md")]), network_discovery_path: "/.well-known/dcp", source: "https://github.com/ammbo/dossy" }, null, 2));
 console.log(`Built documentation home, ${docPages.length} guides, ${tools.length} tool definitions, and verified downloads.`);

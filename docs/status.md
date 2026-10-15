@@ -37,6 +37,6 @@ The hosted launch also needs configured and verified database and email provider
 
 The public repository contains DCP, the SDK, bridge, conformance suite, and protocol site. Commercial use and independent implementations are welcome under [Apache-2.0](/license). The hosted Dossy service is a separate proprietary implementation; the public repository is not its self-hosting distribution.
 
-SDK and bridge release downloads are available from this documentation build. Publication to the npm registry is separate; use the tarball URLs in the [integration guide](/integrate).
+The bridge is published on npm as `@dossyai/mcp-bridge`, with provenance, by the public repository's release workflow. SDK release downloads are available from this documentation build and are not on npm; use the tarball URLs in the [integration guide](/integrate).
 
 There is one public network, so one registry answers whether a board exists. Clients accept any issuer's URL, so a separately operated closed network is possible, but networks do not federate. Use [conformance](/conformance) when building your own implementation.

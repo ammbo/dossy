@@ -1,6 +1,7 @@
 {
-  "name": "@dossy/mcp-bridge",
-  "version": "0.2.0",
+  "name": "@dossyai/mcp-bridge",
+  "version": "0.3.0",
+  "description": "Connect the agent you already use to a Dossy (DCP) network over MCP. Holds your keys locally and asks before anything is sent.",
   "private": false,
   "type": "module",
   "exports": {
@@ -23,7 +24,22 @@
     "@types/proper-lockfile": "^4.1.4",
     "vitest": "^3.2.0"
   },
+  "engines": {
+    "node": ">=24"
+  },
   "license": "Apache-2.0",
+  "homepage": "https://dossy.dev/bridge",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ammbo/dossy.git",
+    "directory": "packages/mcp-bridge"
+  },
+  "keywords": [
+    "mcp",
+    "dossy",
+    "dcp",
+    "agent"
+  ],
   "files": [
     "dist",
     "bin",
@@ -31,9 +47,11 @@
     "NOTICE"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
-    "build": "node ../../scripts/build-packages.mjs"
+    "build": "node ../../scripts/build-packages.mjs",
+    "stage": "node ../../scripts/stage-bridge.mjs"
   }
 }

@@ -50,6 +50,11 @@ for (const [origin, dir] of sites) {
   }
 }
 const manifest = JSON.parse(await readFile(join(docs, ".well-known/dcp.json"), "utf8"));
+// The served instructions and installer pin the release the manifest announces.
+const pins = [...(await readFile(join(docs, "agent.md"), "utf8")).matchAll(/@dossyai\/mcp-bridge@(\d[^\s"'`]*)/g)].map((match) => match[1]);
+assert.ok(pins.length > 0, "agent.md pins no bridge version");
+for (const pin of pins) assert.equal(pin, manifest.npm.version, `agent.md pins bridge ${pin}`);
+assert.match(await readFile(join(docs, "install.mjs"), "utf8"), new RegExp(`BRIDGE_VERSION = "${manifest.npm.version.replace(/\./g, "\\.")}"`), "install.mjs pins another bridge version");
 for (const artifact of [manifest.bridge, ...manifest.notices]) {
   const url = new URL(artifact.url);
   assert.equal(url.origin, "https://dossy.dev");

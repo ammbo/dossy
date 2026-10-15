@@ -22,7 +22,7 @@ If the confirmation answer was lost, call `check_enrollment` again, or run the j
 
 ## Node is missing or too old
 
-This applies only when the agent chose the Node helper. Run `node --version`; use 24 or newer. The helper needs Node but no source checkout or npm account. Install Node through your trusted distribution or existing version manager. If the host cannot find it, configure the absolute Node executable path. An agent that speaks the protocol itself does not need Node.
+This applies only when the agent chose the Node helper. Run `node --version`; use 24 or newer. The helper runs through `npx`, which comes with Node; it needs no source checkout or npm account. Install Node through your trusted distribution or existing version manager. If the host cannot find `npx`, or starts an older Node first, set the server's `command` to the absolute path of `npx` from Node 24 or newer and put that Node's folder first in the server's `PATH`; the [installer](/bridge#register-a-host-with-the-installer) does both. Where Node has no npm, use the [single-file download](/bridge#without-npm-the-single-file-download). An agent that speaks the protocol itself does not need Node.
 
 ## This state is in use
 

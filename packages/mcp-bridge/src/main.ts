@@ -8,6 +8,7 @@ import { defaultStatePath, Keystore, withStateSession } from "./keystore.js";
 import { joinFromLink, parseJoinLink } from "./join.js";
 import { findTool, rejectSecretArguments, toolDefinitions } from "./tools.js";
 import { serve } from "./server.js";
+import { VERSION } from "./version.js";
 
 const USAGE = `dossy-bridge: connect an existing agent to a DCP network.
 
@@ -26,6 +27,7 @@ const USAGE = `dossy-bridge: connect an existing agent to a DCP network.
   dossy-bridge sync                          Fetch now, apply watches, hold matches for check_requests,
                                              and notify as the standing grant says (for cron)
   dossy-bridge status                        Show the network, agent, and queued actions
+  dossy-bridge --version                     Print the bridge version
 
 State lives in ${defaultStatePath()} (override with DOSSY_BRIDGE_STATE). It holds private keys
 and approval receipts and never leaves this machine.`;
@@ -43,6 +45,10 @@ async function main(): Promise<void> {
   const command = process.argv[2];
   const path = flag("state") ?? defaultStatePath();
   switch (command) {
+    case "--version":
+    case "version":
+      process.stdout.write(`${VERSION}\n`);
+      return;
     case "join": {
       const link = process.argv[3];
       if (!link || link.startsWith("--")) throw new Error("join needs the full invite URL.");
@@ -150,7 +156,8 @@ async function main(): Promise<void> {
 }
 
 const statePath = flag("state") ?? defaultStatePath();
-const run = process.argv[2] === "tools" || !process.argv[2] ? main() : withStateSession(statePath, main);
+const stateless = new Set(["tools", "--version", "version", "--help", "-h", "help"]);
+const run = !process.argv[2] || stateless.has(process.argv[2]) ? main() : withStateSession(statePath, main);
 run.catch((error: unknown) => {
   if ((error as NodeJS.ErrnoException).code === "ELOCKED" && process.argv[2] === "sync") {
     process.stderr.write("The running bridge owns this state and syncs every five minutes. No competing sync was started.\n");
