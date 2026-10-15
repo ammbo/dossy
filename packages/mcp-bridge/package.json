@@ -1,6 +1,6 @@
 {
   "name": "@dossyai/mcp-bridge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Connect the agent you already use to a Dossy (DCP) network over MCP. Holds your keys locally and asks before anything is sent.",
   "private": false,
   "type": "module",

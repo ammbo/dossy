@@ -4,7 +4,7 @@ import { hostname } from "node:os";
 import { DossyClient, ProtocolClientError } from "@dossy/sdk";
 import { BrowserApprover, openInBrowser } from "./approval.js";
 import { Bridge, DEFAULT_NETWORK } from "./bridge.js";
-import { defaultStatePath, expandHome, Keystore, withStateSession } from "./keystore.js";
+import { defaultStatePath, expandHome, Keystore, trySyncLease, withStateSession, withStateTask } from "./keystore.js";
 import { joinFromLink, parseJoinLink } from "./join.js";
 import { findTool, rejectSecretArguments, toolDefinitions } from "./tools.js";
 import { serve } from "./server.js";
@@ -43,6 +43,10 @@ async function exists(path: string): Promise<boolean> {
 
 async function main(): Promise<void> {
   const command = process.argv[2];
+  if (process.argv.includes("--help") || process.argv.includes("-h") || command === "help") {
+    process.stdout.write(`${USAGE}\n`);
+    return;
+  }
   const path = expandHome(flag("state") ?? defaultStatePath());
   switch (command) {
     case "--version":
@@ -70,7 +74,10 @@ async function main(): Promise<void> {
       const approver = new BrowserApprover();
       try {
         const bridge = await Bridge.start(await Keystore.open(path), approver);
-        process.stdout.write(`${JSON.stringify(await tool.run(bridge, args), null, 2)}\n`);
+        const result = tool.scope === "guest"
+          ? await withStateTask(path, "session", async () => { await bridge.refresh(); return tool.run(bridge, args); })
+          : await tool.run(bridge, args);
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       } finally { await approver.close(); }
       return;
     }
@@ -138,10 +145,17 @@ async function main(): Promise<void> {
       return;
     }
     case "sync": {
-      const store = await Keystore.open(path);
-      const bridge = await Bridge.start(store, new BrowserApprover());
-      const count = await bridge.syncToDigest();
-      process.stderr.write(`${count} new request(s) held for your agent.\n`);
+      const release = await trySyncLease(path);
+      if (!release) {
+        process.stderr.write("A running bridge owns background sync for this identity. No competing sync was started.\n");
+        return;
+      }
+      try {
+        const store = await Keystore.open(path);
+        const bridge = await Bridge.start(store, new BrowserApprover());
+        const count = await bridge.syncToDigest();
+        process.stderr.write(`${count} new request(s) held for your agent.\n`);
+      } finally { await release(); }
       return;
     }
     case "status": {
@@ -156,14 +170,12 @@ async function main(): Promise<void> {
 }
 
 const statePath = expandHome(flag("state") ?? defaultStatePath());
-const stateless = new Set(["tools", "--version", "version", "--help", "-h", "help"]);
-const run = !process.argv[2] || stateless.has(process.argv[2]) ? main() : withStateSession(statePath, main);
+// Only onboarding needs a command-wide lock. Servers and CLI tools transact individual writes.
+const onboarding = new Set(["join", "init", "pair", "register"]);
+const run = onboarding.has(process.argv[2] ?? "") && !process.argv.includes("--help") && !process.argv.includes("-h")
+  ? withStateSession(statePath, main) : main();
 run.catch((error: unknown) => {
-  if ((error as NodeJS.ErrnoException).code === "ELOCKED" && process.argv[2] === "sync") {
-    process.stderr.write("The running bridge owns this state and syncs every five minutes. No competing sync was started.\n");
-    return;
-  }
-  const message = (error as NodeJS.ErrnoException).code === "ELOCKED" ? "This state is in use by a running bridge. Use its MCP tools (including join_board), or stop it before running another command." : error instanceof ProtocolClientError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error);
+  const message = (error as NodeJS.ErrnoException).code === "ELOCKED" ? "Another operation is updating this identity. Retry shortly; do not delete a live lock." : error instanceof ProtocolClientError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error);
   process.stderr.write(`dossy-bridge: ${message}\n`);
   process.exit(1);
 });

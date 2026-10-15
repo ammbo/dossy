@@ -72,6 +72,8 @@ export type BridgeState = {
   gaps: Gap[];
   outbox: PendingSend[];
   receipts: Receipt[];
+  /** Acknowledgments retained locally so a competing sender can recover the result. */
+  sent?: Record<string, { result: Record<string, unknown>; keep_until: string }>;
   /** Requests found by a scheduled `dossy-bridge sync`, waiting for the next check_requests. */
   digest?: Record<string, unknown>[];
   /** A network invite from the agent's setup, used until enrollment and then ignored. */
@@ -105,10 +107,11 @@ export function expandHome(path: string): string {
  */
 export class Keystore implements SyncStore {
   private saving: Promise<void> = Promise.resolve();
+  private baseline: BridgeState;
   private constructor(
     readonly path: string,
     readonly state: BridgeState,
-  ) {}
+  ) { this.baseline = structuredClone(state); }
 
   get cursors() {
     return this.state.cursors;
@@ -136,8 +139,14 @@ export class Keystore implements SyncStore {
       outbox: [],
       receipts: [],
     });
-    await store.save();
-    return store;
+    // Concurrent first starts must adopt the same identity, never replace its private key.
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    return withStateTask(path, "write", async () => {
+      try { return await Keystore.open(path); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      await store.persist();
+      return store;
+    });
   }
 
   static async open(path: string): Promise<Keystore> {
@@ -152,20 +161,40 @@ export class Keystore implements SyncStore {
     return operation;
   }
 
-  private async write(now: Date): Promise<void> {
-    this.prune(now);
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    await withLock(`${this.path}.write`, { retries: { retries: 20, minTimeout: 20, maxTimeout: 100 } }, async () => {
-      let saved: BridgeState | undefined;
-      try { saved = JSON.parse(await readFile(this.path, "utf8")) as BridgeState; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      if ((saved?.revision ?? 0) !== (this.state.revision ?? 0)) throw new Error("Bridge state changed in another process. Reload it before continuing; no keys were overwritten.");
-      this.state.revision = (this.state.revision ?? 0) + 1;
-      const temporary = `${this.path}.${randomId(6)}.tmp`;
-      await writeFile(temporary, JSON.stringify(this.state, null, 2), { mode: 0o600 });
-      await rename(temporary, this.path);
-      await chmod(this.path, 0o600);
+  /** Refresh reads atomically replaced files and preserves any not-yet-saved local edits. */
+  refresh(): Promise<void> {
+    const operation = this.saving.then(async () => {
+      const saved = migrate(JSON.parse(await readFile(this.path, "utf8")), this.path);
+      this.adopt(mergeState(this.baseline, this.state, saved));
+      this.baseline = structuredClone(saved);
     });
+    this.saving = operation.catch(() => {});
+    return operation;
+  }
+
+  private adopt(state: BridgeState): void {
+    for (const key of Object.keys(this.state)) delete (this.state as unknown as Record<string, unknown>)[key];
+    Object.assign(this.state, state);
+  }
+
+  private async write(now: Date): Promise<void> {
+    await withStateTask(this.path, "write", async () => {
+      const saved = migrate(JSON.parse(await readFile(this.path, "utf8")), this.path);
+      // Apply only edits since our last read, to the latest disk state. Collections use stable
+      // identities: an unrelated session cannot erase additions or resurrect acknowledged sends.
+      this.adopt(mergeState(this.baseline, this.state, saved));
+      this.prune(now);
+      await this.persist();
+    });
+  }
+
+  private async persist(): Promise<void> {
+    this.state.revision = (this.state.revision ?? 0) + 1;
+    const temporary = `${this.path}.${randomId(6)}.tmp`;
+    await writeFile(temporary, JSON.stringify(this.state, null, 2), { mode: 0o600 });
+    await rename(temporary, this.path);
+    await chmod(this.path, 0o600);
+    this.baseline = structuredClone(this.state);
   }
 
   publicSigningJwk(): PublicJwk {
@@ -208,6 +237,7 @@ export class Keystore implements SyncStore {
       this.state.keys[kind] = Object.fromEntries(Object.entries(this.state.keys[kind]).filter(([, held]) => live(held)));
     }
     this.state.outbox = this.state.outbox.filter(live);
+    this.state.sent = Object.fromEntries(Object.entries(this.state.sent ?? {}).filter(([, item]) => live(item)));
     this.state.receipts = this.state.receipts.slice(-RECEIPT_LIMIT);
     this.state.gaps = this.state.gaps.slice(-100);
     this.state.digest = (this.state.digest ?? []).filter((item) => Date.parse(String(item.expires_at)) > now.getTime()).slice(-200);
@@ -215,10 +245,77 @@ export class Keystore implements SyncStore {
   }
 }
 
-/** One process owns a state's read/modify/write lifecycle. A running server also schedules sync. */
+/** Serializes onboarding commands only. Servers never hold this lock for their lifetime. */
 export async function withStateSession<T>(path: string, fn: () => Promise<T>): Promise<T> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  return withLock(`${path}.session`, { stale: 60_000, retries: 0 }, fn);
+  return withLock(`${path}.session`, { stale: 10_000, update: 2_000, retries: 0 }, fn);
+}
+
+/** Heartbeating task locks serialize feeds and atomically claim outbox sends across processes. */
+export async function withStateTask<T>(path: string, task: string, fn: () => Promise<T>): Promise<T> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  return withLock(`${path}.${task}`, {
+    stale: 10_000, update: 2_000,
+    retries: { retries: 600, minTimeout: 20, maxTimeout: 100 },
+  }, fn);
+}
+
+/** A single server owns background sync; heartbeat permits takeover after exit or a crash. */
+export async function trySyncLease(path: string): Promise<(() => Promise<void>) | undefined> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  try {
+    return await lockfile.lock(`${path}.sync`, { realpath: false, stale: 10_000, update: 2_000, retries: 0 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOCKED") return undefined;
+    throw error;
+  }
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+
+/** Three-way patching keeps the existing mutable SyncStore API safe between disk transactions. */
+function mergeState(base: BridgeState, local: BridgeState, disk: BridgeState): BridgeState {
+  if (!same(base.signing_jwk, disk.signing_jwk)) throw new Error("The bridge identity changed on disk. Restart this session before continuing.");
+  return mergeValue(base, local, disk, "") as BridgeState;
+}
+
+function mergeValue(base: unknown, local: unknown, disk: unknown, field: string): unknown {
+  if (same(base, local)) return structuredClone(disk);
+  // These are complete human-approved decisions, not independently mergeable properties.
+  // Combining one prompt's notifier with another prompt's actions could invent consent.
+  if (["grant", "pending_grant", "enrollment", "pairing"].includes(field)) return structuredClone(local);
+  if (Array.isArray(local)) {
+    const key = field === "followed" ? (item: unknown) => String(item)
+      : field === "watches" ? (item: unknown) => String((item as Watch).name)
+      : field === "outbox" ? (item: unknown) => String((item as PendingSend).operation_id)
+      : field === "receipts" ? (item: unknown) => String((item as Receipt).authorization_ref)
+      : field === "digest" ? (item: unknown) => String((item as Record<string, unknown>).request_id)
+      : field === "gaps" ? (item: unknown) => JSON.stringify(item)
+      : undefined;
+    if (key) {
+      const before = new Map((Array.isArray(base) ? base : []).map(item => [key(item), item]));
+      const after = new Map(local.map(item => [key(item), item]));
+      const merged = new Map((Array.isArray(disk) ? disk : []).map(item => [key(item), item]));
+      for (const id of before.keys()) if (!after.has(id)) merged.delete(id);
+      for (const [id, item] of after) {
+        if (!same(before.get(id), item)) merged.set(id, structuredClone(item));
+      }
+      return [...merged.values()];
+    }
+  }
+  if (object(local) && (object(base) || base === undefined) && (object(disk) || disk === undefined)) {
+    const merged = { ...(object(disk) ? disk : {}) };
+    for (const key of new Set([...Object.keys(object(base) ? base : {}), ...Object.keys(local)])) {
+      if (key === "revision") continue;
+      const before = object(base) ? base[key] : undefined;
+      if (same(before, local[key])) continue;
+      if (!(key in local)) delete merged[key];
+      else merged[key] = mergeValue(before, local[key], merged[key], key);
+    }
+    return merged;
+  }
+  return structuredClone(local);
 }
 
 /**

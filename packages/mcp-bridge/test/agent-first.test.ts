@@ -68,6 +68,28 @@ function codeOnly(fetchImpl: typeof fetch): typeof fetch {
 }
 
 suite("agent-first bridge", () => {
+  it("CLI enrollment leaves the grant null and CLI completion preserves an MCP-approved grant", async () => {
+    for (const viaMcp of [false, true]) {
+      const inviter = await target!.enroll(`cli-grant-inviter-${tag()}`);
+      const invite = await inviter.client.createInvite({ kind: "network" });
+      const link = local(invite.invite_url);
+      const { bridge, store } = await guestBridge(target!, link);
+      const email = `cli-grant-${tag()}@example.test`;
+      const options = { fetchImpl: bridge.client.fetchImpl, clock: target!.clock };
+      if (viaMcp) await bridge.enroll(email);
+      else await joinFromLink(store, link, { ...options, email });
+      const result = await joinFromLink(await Keystore.open(store.path), link, { ...options, code: String(await target!.latestCode!(email)) });
+      expect(result.status).toBe("connected");
+      const status = await bridge.networkStatus();
+      if (viaMcp) expect(status.grant).toMatchObject({ standing_actions: RECOMMENDED_ACTIONS });
+      else {
+        expect(status.grant).toBeNull();
+        expect(String(result.next)).toContain("call update_grant");
+      }
+      expect((await Keystore.open(store.path)).state.pending_grant).toBeUndefined();
+    }
+  });
+
   it("onboards from an invite in the setup: invitation, catalog, code, and membership", async () => {
     const inviter = await target!.enroll("guest-inviter");
     const invite = await inviter.client.createInvite({ kind: "network", label: "Ana" });

@@ -33,6 +33,17 @@ async function approvalUrl(run: ReturnType<typeof launch>): Promise<string> {
 
 const approval = { action: "update_grant", title: "Change the grant", recipient: "Nobody", disclosure: { standing_actions: [] }, permits: ["Nothing new"] };
 
+it("prints subcommand help without creating state or validating an invite", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dossy-help-"));
+  try {
+    const run = launch(["src/main.ts", "join", "--help", "--state", join(dir, "bridge.json")]);
+    expect(await run.exit, run.output.stderr).toBe(0);
+    expect(run.output.stdout).toContain("join <invite-url> --email");
+    expect(run.output.stderr).toBe("");
+    expect(await readdir(dir)).toEqual([]);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 describe("browser approvals from the CLI", () => {
   it("keeps the process alive until the human decides, then exits", async () => {
     const run = launch(["test/fixtures/approve-once.ts"]);

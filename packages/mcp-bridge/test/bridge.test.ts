@@ -43,6 +43,65 @@ const hiring = (boardId: string) => ({
 });
 
 suite("MCP bridge end to end", () => {
+  it("serializes concurrent feed readers without duplicate delivery or lost cursors", async () => {
+    const requester = await bridgeFor(target!, "concurrent-feed-requester");
+    const published = await requester.bridge.publishRequest(hiring(target!.boardId));
+    const responder = await bridgeFor(target!, "concurrent-feed-responder");
+    const bridges = [responder.bridge, ...await Promise.all(Array.from({ length: 2 }, async () => Bridge.start(await Keystore.open(responder.store.path), responder.human, { fetchImpl: responder.party.client.fetchImpl, clock: target!.clock })))];
+    const results = await Promise.all(bridges.map(bridge => bridge.checkRequests(target!.boardId)));
+    const delivered = results.flatMap(result => result.new_requests as Record<string, unknown>[]).filter(request => request.request_id === published.request_id);
+    expect(delivered).toHaveLength(1);
+    const saved = (await Keystore.open(responder.store.path)).state;
+    expect(saved.cursors[target!.boardId].phase).toBe("feed");
+    expect(Object.keys(saved.fetched!)).toContain(String(published.request_id));
+  });
+
+  it("keeps the approved key and recovers one network effect after a failed acknowledgment write", async () => {
+    const requester = await bridgeFor(target!, "ack-write-requester");
+    const save = requester.store.save.bind(requester.store);
+    let failed = false;
+    requester.store.save = now => {
+      if (!failed && Object.keys(requester.store.state.sent ?? {}).length) {
+        failed = true;
+        return Promise.reject(Object.assign(new Error("Synthetic disk failure after acceptance"), { code: "EIO" }));
+      }
+      return save(now);
+    };
+    await expect(requester.bridge.publishRequest(hiring(target!.boardId))).rejects.toThrow("Synthetic disk failure");
+    const disk = await Keystore.open(requester.store.path);
+    expect(disk.state.outbox).toHaveLength(1);
+    expect(Object.keys(disk.state.keys.reply)).toHaveLength(1);
+    const recovered = await Bridge.start(disk, requester.human, { fetchImpl: requester.party.client.fetchImpl, clock: target!.clock });
+    expect(disk.state.outbox).toEqual([]);
+    const id = Object.keys(disk.state.keys.reply)[0]!;
+    expect(id).not.toMatch(/^pending-/);
+    expect((await recovered.activity()).my_requests).toEqual([expect.objectContaining({ request_id: id })]);
+    expect(disk.state.receipts).toHaveLength(1);
+    expect(disk.state.receipts[0]!.object).toEqual({ type: "request", id });
+  });
+
+  it("does not replace an acceptance key when another session retries a queued offer", async () => {
+    const requester = await bridgeFor(target!, "accept-key-requester");
+    const responder = await bridgeFor(target!, "accept-key-responder");
+    const request = await requester.bridge.publishRequest(hiring(target!.boardId));
+    const offer = await responder.bridge.offerInterest({ request_id: String(request.request_id), allow_connection: false });
+    const realFetch = requester.bridge.client.fetchImpl;
+    requester.bridge.client.fetchImpl = async (input, init) => {
+      if (String(input).endsWith(`/offers/${String(offer.offer_id)}/accept`)) return new Response(JSON.stringify({ error: "unavailable" }), { status: 503 });
+      return realFetch(input, init);
+    };
+    expect(await requester.bridge.acceptOffer(String(offer.offer_id))).toMatchObject({ queued: true });
+    const key = (await Keystore.open(requester.store.path)).state.keys.accept[String(offer.offer_id)];
+    // A second live bridge can inspect it, but must not generate a replacement key or approval.
+    const other = await Bridge.start(await Keystore.open(requester.store.path), requester.human, { fetchImpl: requester.bridge.client.fetchImpl, clock: target!.clock });
+    expect(await other.acceptOffer(String(offer.offer_id))).toMatchObject({ queued: true });
+    expect(other.store.state.keys.accept[String(offer.offer_id)]).toEqual(key);
+    expect(other.store.state.outbox).toHaveLength(1);
+    other.client.fetchImpl = realFetch;
+    expect((await other.flushOutbox())[0]).toMatchObject({ sent: true });
+    expect(other.store.state.keys.accept[String(offer.offer_id)]).toEqual(key);
+  });
+
   it("publishes, considers, offers, connects, and hands off with every outward step approved", async () => {
     const requester = await bridgeFor(target!, "bridge-requester");
     const responder = await bridgeFor(target!, "bridge-responder");

@@ -49,6 +49,7 @@ const existingAccount = (error: unknown) => error instanceof ProtocolClientError
  * private-board invite.
  */
 export async function joinFromLink(store: Keystore, link: string, options: JoinOptions = {}): Promise<Record<string, unknown>> {
+  await store.refresh();
   const invitation = parseJoinLink(link);
   if (store.state.network_url !== invitation.network) throw new Error("This state belongs to another network. Use --state with a separate file for this network.");
   const clock = options.clock ?? { now: () => new Date() };
@@ -60,6 +61,11 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
   const remember = async (details: Record<string, unknown>) => {
     store.state.joined_invites = { ...store.state.joined_invites, [inviteDigest]: details };
     delete store.state.enrollment;
+    if (store.state.agent_id) delete store.state.pending_invite;
+    if (store.state.agent_id && store.state.pending_grant) {
+      store.state.grant = store.state.pending_grant;
+      delete store.state.pending_grant;
+    }
     await store.save(clock.now());
   };
 
@@ -104,7 +110,9 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
         }
         store.state.agent_id = String(confirmed.agent_id);
         await remember(pending.community);
-        return { status: "connected", agent_id: confirmed.agent_id, ...(confirmed.existing_account ? { existing_account: true } : {}) };
+        return { status: "connected", agent_id: confirmed.agent_id, grant: store.state.grant ?? null,
+          ...(!store.state.grant ? { next: "Connected. Email approval registers this agent; it does not approve a local standing grant. Run call update_grant --json '{}' with the same --state file. Your human approves the grant in a separate browser prompt; leave it null to ask before every action." } : {}),
+          ...(confirmed.existing_account ? { existing_account: true } : {}) };
       } catch (error) {
         if (existingAccount(error)) {
           // Someone created an account with this address since the code was sent. Pairing is the way in now.

@@ -2,6 +2,7 @@ import type { Readable, Writable } from "node:stream";
 import { BrowserApprover, ElicitationApprover, type Approver } from "./approval.js";
 import { Bridge, ToolError } from "./bridge.js";
 import { findTool, instructionsFor, rejectSecretArguments, toolsFor } from "./tools.js";
+import { trySyncLease, withStateTask } from "./keystore.js";
 import { VERSION } from "./version.js";
 
 // MCP over stdio: one JSON-RPC message per line, UTF-8, no embedded newlines.
@@ -23,6 +24,9 @@ export type ServeOptions = {
   fallbackApprover?: () => Approver;
   /** Whether the state is enrolled yet, before the bridge connects. Defaults to member. */
   mode?: () => "guest" | "member";
+  /** Override scheduling in embedded runtimes/tests. Defaults: sync every five minutes, lease retry every two seconds. */
+  syncIntervalMs?: number;
+  leaseCheckMs?: number;
 };
 
 type Mode = "guest" | "member";
@@ -89,7 +93,11 @@ export function serve(options: ServeOptions): Promise<void> {
       case "tools/list": {
         let connected: Bridge | undefined;
         try {
-          connected = await ready();
+          connected = await exclusive(async () => {
+            const connected = await ready();
+            await connected.refresh?.();
+            return connected;
+          });
         } catch {
           connected = undefined;
         }
@@ -102,19 +110,29 @@ export function serve(options: ServeOptions): Promise<void> {
         const args = (message.params?.arguments as Record<string, unknown> | undefined) ?? {};
         try {
           rejectSecretArguments(args);
-          const connected = await ready();
-          const mode = modeOf(connected);
-          const tool = findTool(name, mode, await moderatorOf(connected));
-          if (!tool) {
-            const text = mode === "guest" ? `${name} is available once your human has joined. Finish enrollment first, or pairing if they already have an account.` : `${name} is not available to this agent.`;
-            return { content: [{ type: "text", text }], isError: true };
-          }
-          const result = await exclusive(() => tool.run(connected, args));
-          if (modeOf(connected) !== announced) {
-            announced = modeOf(connected);
-            write({ method: "notifications/tools/list_changed" });
-          }
-          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result, isError: false };
+          return await exclusive(async () => {
+            const connected = await ready();
+            await connected.refresh?.();
+            const mode = modeOf(connected);
+            const tool = findTool(name, mode, await moderatorOf(connected));
+            if (!tool) {
+              const text = mode === "guest" ? `${name} is available once your human has joined. Finish enrollment first, or pairing if they already have an account.` : `${name} is not available to this agent.`;
+              return { content: [{ type: "text", text }], isError: true };
+            }
+            const runTool = async () => {
+              await connected.refresh?.();
+              const current = findTool(name, modeOf(connected), await moderatorOf(connected));
+              if (!current) throw new ToolError("Onboarding finished in another session. List tools again to continue.");
+              return current.run(connected, args);
+            };
+            const result = tool.scope === "guest" && connected.store
+              ? await withStateTask(connected.store.path, "session", runTool) : await runTool();
+            if (modeOf(connected) !== announced) {
+              announced = modeOf(connected);
+              write({ method: "notifications/tools/list_changed" });
+            }
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result, isError: false };
+          });
         } catch (error) {
           const text = error instanceof ToolError || error instanceof Error ? error.message : "The tool failed.";
           return { content: [{ type: "text", text }], isError: true };
@@ -126,9 +144,32 @@ export function serve(options: ServeOptions): Promise<void> {
   };
 
   return new Promise((resolve) => {
-    const timer = setInterval(() => {
-      if (bridge) void exclusive(async () => { await (await ready()).syncToDigest(); }).catch(() => {});
-    }, 5 * 60_000);
+    let releaseLease: (() => Promise<void>) | undefined;
+    let stopped = false;
+    let checking = false;
+    const relinquish = async () => {
+      const release = releaseLease;
+      releaseLease = undefined;
+      await release?.();
+    };
+    let nextSync = Date.now() + (options.syncIntervalMs ?? 5 * 60_000);
+    const tick = async () => {
+      if (checking || stopped || !bridge) return;
+      checking = true;
+      try {
+        const connected = await ready();
+        // Embedded bridges without a store retain the ordinary timer behavior.
+        if (!releaseLease && connected.store) releaseLease = await trySyncLease(connected.store.path);
+        if (stopped) { await relinquish(); return; }
+        if ((releaseLease || !connected.store) && Date.now() >= nextSync) {
+          nextSync = Date.now() + (options.syncIntervalMs ?? 5 * 60_000);
+          await exclusive(() => connected.syncToDigest());
+        }
+      } catch (error) {
+        process.stderr.write(`dossy-bridge background sync: ${error instanceof Error ? error.message : String(error)}\n`);
+      } finally { checking = false; }
+    };
+    const timer = setInterval(() => { void tick(); }, options.leaseCheckMs ?? 2_000);
     timer.unref();
     let buffer = "";
     options.input.setEncoding("utf8");
@@ -160,6 +201,10 @@ export function serve(options: ServeOptions): Promise<void> {
         );
       }
     });
-    options.input.on("end", () => { clearInterval(timer); void work.finally(() => resolve()); });
+    options.input.on("end", () => {
+      stopped = true;
+      clearInterval(timer);
+      void work.finally(async () => { await relinquish(); resolve(); });
+    });
   });
 }

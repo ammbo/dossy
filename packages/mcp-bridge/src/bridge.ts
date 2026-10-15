@@ -27,7 +27,7 @@ import {
 } from "@dossy/sdk";
 import { ExistingAccountError, joinFromLink, parseJoinLink } from "./join.js";
 import type { Approver, ApprovalRequest } from "./approval.js";
-import type { FetchedRequest, Keystore, PendingSend, StandingGrant } from "./keystore.js";
+import { withStateTask, type FetchedRequest, type Keystore, type PendingSend, type StandingGrant } from "./keystore.js";
 import { notifyHuman, type Notifier } from "./notify.js";
 
 const HOUR = 3600_000;
@@ -105,6 +105,7 @@ export class Bridge {
    * and enrolls or pairs; nothing else.
    */
   static async start(store: Keystore, approver: Approver, options: BridgeOptions = {}): Promise<Bridge> {
+    await store.refresh();
     const clock = options.clock ?? { now: () => new Date() };
     const client = new DossyClient({
       networkUrl: store.state.network_url,
@@ -122,6 +123,23 @@ export class Bridge {
       await bridge.flushOutbox();
     }
     return bridge;
+  }
+
+  /** Picks up enrollment, grants, follows, keys and watches changed by another session. */
+  async refresh(): Promise<void> {
+    await this.store.refresh();
+    const state = this.store.state;
+    if (this.client.networkUrl !== state.network_url) {
+      this.client = new DossyClient({ networkUrl: state.network_url, issuer: state.issuer, fetchImpl: this.options.fetchImpl, clock: this.clock });
+      this.moderator = undefined;
+    }
+    if (this.client.agentId !== state.agent_id) {
+      this.client.agentId = state.agent_id;
+      this.client.signingKey = state.agent_id ? await this.store.signingKey() : undefined;
+      this.client.accessToken = undefined;
+      this.moderator = undefined;
+      if (state.agent_id) await this.adoptMemberBoards();
+    }
   }
 
   get mode(): "guest" | "member" {
@@ -332,7 +350,7 @@ export class Bridge {
     this.client.signingKey = await this.store.signingKey();
     // An existing member may already belong to private boards. If listing them fails, the next start adopts them.
     await this.adoptMemberBoards().catch(() => {});
-    return grant;
+    return grant ?? state.grant;
   }
 
   // Pairing, for a human who already has an account. The invite in the setup is left unspent.
@@ -421,6 +439,7 @@ export class Bridge {
   // Reads. Nothing here is recorded by the network, and nothing here is sent anywhere else.
 
   async networkStatus(): Promise<Row> {
+    await this.refresh();
     const discovery = await this.client.discover();
     if (this.mode === "guest") {
       const pairing = this.store.state.pairing;
@@ -443,6 +462,7 @@ export class Bridge {
       followed_boards: this.store.state.followed ?? [],
       watches: (this.store.state.watches ?? []).map((watch) => watch.name),
       grant: this.store.state.grant ?? null,
+      ...(!this.store.state.grant ? { grant_next: "No standing grant has been approved on this machine. Email approval connects the agent only. Run call update_grant --json '{}' with this state file, or use the update_grant MCP tool; your human approves it in a separate prompt." } : {}),
       unreported_gaps: this.store.state.gaps,
       queued_actions: this.store.state.outbox.map((item) => ({ action: item.method, queued_at: item.queued_at })),
     };
@@ -487,6 +507,7 @@ export class Bridge {
 
   /** Follows a board locally. The network keeps no follower list; open boards arrive through the network feed. */
   async follow(board: string): Promise<Row> {
+    await this.refresh();
     const entry = await this.resolveBoard(board);
     const id = String(entry.board_id);
     const followed = new Set(this.store.state.followed ?? []);
@@ -497,6 +518,7 @@ export class Bridge {
   }
 
   async unfollow(board: string): Promise<Row> {
+    await this.refresh();
     const id = this.boardId(board);
     this.store.state.followed = (this.store.state.followed ?? []).filter((item) => item !== id);
     await this.store.save(this.now());
@@ -505,6 +527,7 @@ export class Bridge {
 
   /** Adds or replaces a local watch. Its criteria never leave this machine. */
   async setWatch(watch: Watch): Promise<Row> {
+    await this.refresh();
     this.requireMember();
     if (!watch.name?.trim() || !watch.intent?.trim()) throw new ToolError("A watch needs a name and the human's intent in their words.");
     const boards = watch.boards?.map((board) => this.boardId(board));
@@ -519,6 +542,7 @@ export class Bridge {
   }
 
   async removeWatch(name: string): Promise<Row> {
+    await this.refresh();
     this.store.state.watches = (this.store.state.watches ?? []).filter((item) => item.name !== name);
     await this.store.save(this.now());
     return { watches: this.store.state.watches };
@@ -546,6 +570,10 @@ export class Bridge {
 
   /** Catches up on followed boards and watches and returns what is new, triaged locally. */
   async checkRequests(boardId?: string): Promise<Row> {
+    return this.withFeed(() => this.checkRequestsLocked(boardId));
+  }
+
+  private async checkRequestsLocked(boardId?: string): Promise<Row> {
     this.requireMember();
     const found = await this.discoverNew(boardId ? this.boardId(boardId) : undefined);
     const queued = this.store.state.digest ?? [];
@@ -564,6 +592,10 @@ export class Bridge {
    * never sees the words.
    */
   async search(query: string, filter: { boards?: string[]; classes?: string[] } = {}): Promise<Row> {
+    return this.withFeed(() => this.searchLocked(query, filter));
+  }
+
+  private async searchLocked(query: string, filter: { boards?: string[]; classes?: string[] }): Promise<Row> {
     this.requireMember();
     const found = await this.discoverNew(undefined, true);
     this.store.state.digest = [...(this.store.state.digest ?? []), ...found.requests];
@@ -579,6 +611,20 @@ export class Bridge {
 
   /** For a scheduler: finds new requests, holds them for the next check_requests, and notifies on a match. */
   async syncToDigest(): Promise<number> {
+    return this.withFeed(async () => {
+      await this.flushOutbox();
+      return this.syncToDigestLocked();
+    });
+  }
+
+  private async withFeed<T>(fn: () => Promise<T>): Promise<T> {
+    return withStateTask(this.store.path, "feed", async () => {
+      await this.refresh();
+      return fn();
+    });
+  }
+
+  private async syncToDigestLocked(): Promise<number> {
     if (this.mode === "guest") return 0;
     const found = await this.discoverNew();
     this.store.state.digest = [...(this.store.state.digest ?? []), ...found.requests];
@@ -744,6 +790,7 @@ export class Bridge {
    * the notifier will run, so a prompt in a request cannot widen the agent's authority.
    */
   async updateGrant(input: { standing_actions?: string[]; notify?: StandingGrant["notify"]; expires_in_days?: number }): Promise<Row> {
+    await this.refresh();
     this.requireMember();
     const actions = [...new Set(input.standing_actions ?? RECOMMENDED_ACTIONS)];
     const unknown = actions.filter((action) => !GRANTABLE_ACTIONS.includes(action));
@@ -927,6 +974,17 @@ export class Bridge {
   }
 
   async acceptOffer(offerId: string): Promise<Row> {
+    // Acceptances share an offer-key slot. Serialize just this offer, including its approval,
+    // so a second session cannot replace the key of a queued or established connection.
+    return withStateTask(this.store.path, `accept-${digestJson(offerId)}`, async () => {
+      await this.refresh();
+      const pending = this.store.state.outbox.find(item => item.method === "acceptOffer" && item.args[0] === offerId && Date.parse(item.keep_until) > this.now().getTime());
+      if (pending) return { sent: false, queued: true, note: "Acceptance of this offer is already approved and queued. Its original key and operation ID will be reused." };
+      return this.acceptOfferLocked(offerId);
+    });
+  }
+
+  private async acceptOfferLocked(offerId: string): Promise<Row> {
     this.requireMember();
     const inbox = await this.client.inbox();
     const offer = (inbox.offers_received as Row[]).find((item) => item.offer_id === offerId);
@@ -1174,23 +1232,49 @@ export class Bridge {
 
   /** Retries approved actions whose acknowledgment was lost. Same operation id, so nothing repeats. */
   async flushOutbox(): Promise<Row[]> {
+    await this.refresh();
     const outcomes: Row[] = [];
     for (const item of [...this.store.state.outbox]) {
       try {
-        const result = await this.invoke(item.method, item.args, item.operation_id, item.mode);
-        outcomes.push({ action: item.method, sent: true, result });
-        this.acknowledge(item, result);
+        const { sent, ...result } = await this.deliver(item.operation_id);
+        outcomes.push({ action: item.method, sent, ...(sent ? { result } : result) });
       } catch (error) {
-        if (isTransient(error)) {
-          outcomes.push({ action: item.method, sent: false, queued: true });
-          continue;
-        }
         outcomes.push({ action: item.method, sent: false, error: describe(error) });
-        this.store.state.outbox = this.store.state.outbox.filter((entry) => entry.operation_id !== item.operation_id);
       }
     }
-    if (outcomes.length) await this.store.save(this.now());
     return outcomes;
+  }
+
+  /** The heartbeat lock is the atomic claim. Re-read inside it before sending, and persist the
+   * acknowledgment before releasing. A crashed sender retries the same network operation ID. */
+  private async deliver(operationId: string): Promise<Row> {
+    return withStateTask(this.store.path, "outbox", async () => {
+      await this.refresh();
+      const completed = this.store.state.sent?.[operationId];
+      if (completed) return { sent: true, ...completed.result };
+      const item = this.store.state.outbox.find(entry => entry.operation_id === operationId);
+      if (!item) return { sent: false, note: "This queued action expired or was already removed." };
+      if (Date.parse(item.keep_until) <= this.now().getTime()) {
+        this.store.state.outbox = this.store.state.outbox.filter(entry => entry.operation_id !== operationId);
+        await this.store.save(this.now());
+        return { sent: false, expired: true };
+      }
+      let result: Row;
+      try {
+        result = await this.invoke(item.method, item.args, item.operation_id, item.mode);
+      } catch (error) {
+        if (isTransient(error)) return { sent: false, queued: true, note: "The network did not answer. The approved action is queued and will be retried with the same operation ID." };
+        this.store.state.outbox = this.store.state.outbox.filter(entry => entry.operation_id !== operationId);
+        await this.store.save(this.now());
+        if (error instanceof ProtocolClientError && error.code === "board_moved") throw new ToolError(`That board was merged into ${String(error.boardId)}. Publish there instead.`);
+        throw new ToolError(describe(error));
+      }
+      this.acknowledge(item, result);
+      // A failed local write after network acceptance must preserve the queued key on disk.
+      // A retry recovers the result through the network's operation-ID deduplication.
+      await this.store.save(this.now());
+      return { sent: true, ...(item.mode === "standing" ? { under_standing_grant: true } : {}), ...result };
+    });
   }
 
   private async sendMessage(connectionId: string, type: "clarification" | "handoff", plaintext: Row, notes: string[]): Promise<Row> {
@@ -1243,6 +1327,7 @@ export class Bridge {
     operationId = randomId(),
     effects?: PendingSend["effects"],
   ): Promise<Row> {
+    await this.refresh();
     const standing = this.grantCovers(approval.action);
     const decision = standing ? { approved: true, channel: "standing_grant" } : await this.approver.request(approval);
     this.store.record({
@@ -1264,20 +1349,7 @@ export class Bridge {
     const item: PendingSend = { operation_id: operationId, method, args, queued_at: this.now().toISOString(), keep_until: keepUntil, mode, ...(effects ? { effects } : {}) };
     this.store.state.outbox.push(item);
     await this.store.save(this.now());
-    try {
-      const result = await this.invoke(method, args, operationId, mode);
-      this.acknowledge(item, result);
-      return { sent: true, ...(standing ? { under_standing_grant: true } : {}), ...result };
-    } catch (error) {
-      if (isTransient(error)) {
-        return { sent: false, queued: true, note: "The network did not answer. The approved action is queued and will be retried without repeating it." };
-      }
-      this.store.state.outbox = this.store.state.outbox.filter((entry) => entry.operation_id !== operationId);
-      if (error instanceof ProtocolClientError && error.code === "board_moved") {
-        throw new ToolError(`That board was merged into ${String(error.boardId)}. Publish there instead.`);
-      }
-      throw new ToolError(describe(error));
-    }
+    return this.deliver(operationId);
   }
 
   private async invoke(method: string, args: unknown[], operationId: string, mode: "human" | "standing" = "human"): Promise<Row> {
@@ -1305,6 +1377,7 @@ export class Bridge {
 
   /** Clears an acknowledged action from the outbox and files its keys and receipt under the new object id. */
   private acknowledge(item: PendingSend, result: Row): void {
+    this.store.state.sent = { ...this.store.state.sent, [item.operation_id]: { result, keep_until: item.keep_until } };
     this.store.state.outbox = this.store.state.outbox.filter((entry) => entry.operation_id !== item.operation_id);
     const created = result.request_id && item.method === "postRequest"
       ? { type: "request", id: String(result.request_id) }
@@ -1329,7 +1402,11 @@ export class Bridge {
       if (result.declined) drop();
       return result;
     } catch (error) {
-      drop();
+      // Lock or disk failures may happen after acceptance, with a retry still owed on disk.
+      if (error instanceof ToolError) {
+        drop();
+        await this.store.save(this.now());
+      }
       throw error;
     }
   }

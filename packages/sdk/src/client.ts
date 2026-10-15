@@ -698,22 +698,39 @@ export class DossyClient {
     if (body !== undefined) headers["content-type"] = "application/json";
     if (auth === "agent" && this.accessToken) headers.authorization = `Bearer ${this.accessToken}`;
     if (auth === "account" && this.accountToken) headers.authorization = `Bearer ${this.accountToken}`;
-    const response = await this.fetchImpl(`${this.networkUrl}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await response.text();
+    // Never include queries (invites/cursors), credentials, headers or request bodies in errors.
+    const url = new URL(`${this.networkUrl}${path}`);
+    const endpoint = `${method} ${url.origin}${url.pathname}`;
+    let response: Response;
+    let text: string;
+    try {
+      response = await this.fetchImpl(url.href, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      text = await response.text();
+    } catch (error) {
+      const cause = error instanceof Error ? (error.cause ?? error) as { code?: unknown; name?: unknown } : {};
+      const code = typeof cause.code === "string" && /^[A-Z0-9_]+$/.test(cause.code) ? cause.code : "network_error";
+      const reason = code === "ENOTFOUND" || code === "EAI_AGAIN" ? "DNS lookup failed"
+        : code === "ECONNREFUSED" ? "connection refused"
+        : code.includes("TIMEOUT") || cause.name === "TimeoutError" ? "request timed out"
+        : cause.name === "AbortError" ? "request aborted"
+        : code.includes("CERT") || code.includes("TLS") ? "TLS verification failed"
+        : "connection or response stream failed";
+      throw new ProtocolClientError("unavailable", `${endpoint}: ${reason} (${code}); no complete HTTP response. Check connectivity and retry the same command with the same state file.`, 0, undefined, true);
+    }
     let parsed: Record<string, unknown> = {};
     try {
       parsed = text ? JSON.parse(text) as Record<string, unknown> : {};
     } catch {
-      if (response.ok) throw new ProtocolClientError("invalid_schema", "Response was not JSON.", response.status);
+      if (response.ok) throw new ProtocolClientError("invalid_schema", `${endpoint}: HTTP ${response.status}; response was not JSON.`, response.status);
     }
     if (!response.ok) {
       throw new ProtocolClientError(
         typeof parsed.error === "string" ? parsed.error : response.status >= 500 ? "unavailable" : "forbidden",
-        typeof parsed.message === "string" ? parsed.message : "",
+        `${endpoint}: HTTP ${response.status}${typeof parsed.message === "string" && parsed.message ? `; ${parsed.message}` : ""}`,
         response.status,
         typeof parsed.retry_after === "number" ? parsed.retry_after : undefined,
         parsed.retryable === true || response.status >= 500,
