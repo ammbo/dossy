@@ -145,7 +145,7 @@ describe("guest onboarding over MCP", () => {
     const init = await call("initialize", { capabilities: {} });
     expect(String(init.result?.instructions)).toContain("read_invitation");
     const names = ((await call("tools/list")).result?.tools as { name: string }[]).map((tool) => tool.name);
-    expect(names).toEqual(expect.arrayContaining(["read_invitation", "enroll", "confirm_enrollment", "list_boards"]));
+    expect(names).toEqual(expect.arrayContaining(["read_invitation", "enroll", "check_enrollment", "confirm_enrollment", "list_boards"]));
     expect(names).not.toContain("publish_request");
     const early = await call("tools/call", { name: "publish_request", arguments: {} });
     expect(early.result?.isError).toBe(true);

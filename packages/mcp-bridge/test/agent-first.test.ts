@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { loadTarget, type ConformanceTarget } from "@dossy/conformance";
 import { randomId } from "@dossy/sdk";
-import { Bridge, joinFromLink, Keystore, parseJoinLink, type ApprovalRequest, type Approver, type MatchSummary } from "../src/index.js";
+import { Bridge, joinFromLink, Keystore, parseJoinLink, RECOMMENDED_ACTIONS, type ApprovalRequest, type Approver, type MatchSummary } from "../src/index.js";
 
 const target = await loadTarget();
 const suite = target?.latestCode ? describe : describe.skip;
@@ -15,9 +15,12 @@ afterAll(async () => target?.close());
 class ScriptedHuman implements Approver {
   shown: ApprovalRequest[] = [];
   decide: (approval: ApprovalRequest) => boolean = () => true;
+  /** The answer to an approval's choice. Undefined keeps the preselected one. */
+  choose?: string;
   async request(approval: ApprovalRequest) {
     this.shown.push(approval);
-    return { approved: this.decide(approval), channel: "test" };
+    const approved = this.decide(approval);
+    return { approved, channel: "test", ...(approved && approval.choice ? { choice: this.choose ?? approval.choice.default } : {}) };
   }
 }
 
@@ -25,7 +28,7 @@ const tag = () => randomId(5).toLowerCase().replace(/[^a-z0-9]/g, "");
 const LOCAL = "http://127.0.0.1";
 const local = (url: unknown) => String(url).replace(/^https?:\/\/[^/]+/, LOCAL);
 
-async function guestBridge(network: ConformanceTarget, inviteUrl: string, notified: MatchSummary[] = []) {
+async function guestBridge(network: ConformanceTarget, inviteUrl: string, notified: MatchSummary[] = [], wrap = (fetchImpl: typeof fetch) => fetchImpl) {
   const dir = await mkdtemp(join(tmpdir(), "dossy-guest-"));
   // Invite links must be HTTPS or local; the test network answers on any host through fetchImpl.
   const store = await Keystore.create(join(dir, "bridge.json"), LOCAL);
@@ -33,19 +36,35 @@ async function guestBridge(network: ConformanceTarget, inviteUrl: string, notifi
   await store.save(network.clock.now());
   const human = new ScriptedHuman();
   const sponsor = await network.enroll(`sponsor-${tag()}`);
-  const bridge = await Bridge.start(store, human, { fetchImpl: sponsor.client.fetchImpl, clock: network.clock, notify: async (_grant, summary) => { notified.push(summary); } });
+  const bridge = await Bridge.start(store, human, { fetchImpl: wrap(sponsor.client.fetchImpl!), clock: network.clock, notify: async (_grant, summary) => { notified.push(summary); } });
   return { bridge, human, store };
 }
 
-/** A member bridge reached through the whole guest flow, the way a new member's agent joins. */
-async function joinedBridge(network: ConformanceTarget, notified: MatchSummary[] = []) {
+/**
+ * A member bridge reached through the whole guest flow, the way a new member's agent joins. Its
+ * human chose `choice` for the standing grant while joining; nothing shown so far is kept.
+ */
+async function joinedBridge(network: ConformanceTarget, notified: MatchSummary[] = [], choice = "recommended") {
   const inviter = await network.enroll(`inviter-${tag()}`);
   const invite = await inviter.client.createInvite({ kind: "network", label: "A friend" });
   const guest = await guestBridge(network, local(invite.invite_url), notified);
   const email = `joined-${tag()}@example.test`;
+  guest.human.choose = choice;
   await guest.bridge.enroll(email, "Test agent");
   await guest.bridge.confirmEnrollment(String(await network.latestCode!(email)));
+  guest.human.shown = [];
   return guest;
+}
+
+/** Sends enrollments the way a client that predates link approval does, so the network answers as it used to. */
+function codeOnly(fetchImpl: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    if (String(input).endsWith("/v0.2/enrollments") && typeof init?.body === "string") {
+      const { confirmation_methods: _methods, ...body } = JSON.parse(init.body) as Record<string, unknown>;
+      return fetchImpl(input, { ...init, body: JSON.stringify(body) });
+    }
+    return fetchImpl(input, init);
+  };
 }
 
 suite("agent-first bridge", () => {
@@ -68,7 +87,56 @@ suite("agent-first bridge", () => {
     await expect(bridge.standing()).resolves.toMatchObject({ invites_remaining: 5 });
   });
 
-  it("points an address that already has an account at pairing, before and after the code is sent", async () => {
+  it("joins with one approval prompt and the emailed link, and applies the grant approved with it", async () => {
+    const inviter = await target!.enroll("link-inviter");
+    const invite = await inviter.client.createInvite({ kind: "network", label: "Ana" });
+    const { bridge, human, store } = await guestBridge(target!, local(invite.invite_url));
+    const read = await bridge.readInvitation();
+    const email = `link-${tag()}@example.test`;
+    const started = await bridge.enroll(email, "Claude Code");
+    expect(started).toMatchObject({ status: "code_sent", key_fingerprint: read.key_fingerprint, next: expect.stringContaining("check_enrollment") });
+    expect(started.confirm_endpoint).toBeUndefined();
+    // The one prompt before anything is sent: joining under this key, with the grant preselected.
+    expect(human.shown).toHaveLength(1);
+    expect(human.shown[0]).toMatchObject({
+      action: "join_network",
+      disclosure: { contact_email: email, key_fingerprint: read.key_fingerprint },
+      choice: { default: "recommended", options: [expect.objectContaining({ value: "recommended" }), expect.objectContaining({ value: "ask" })] },
+    });
+    expect(await bridge.checkEnrollment(0)).toMatchObject({ status: "pending", next: expect.stringContaining("check_enrollment") });
+    await expect(bridge.networkStatus()).resolves.toMatchObject({ enrollment: { pending: true, approve_by: "link_or_code" }, pending_grant: { standing_actions: RECOMMENDED_ACTIONS } });
+    await target!.approveEnrollmentLink!(email, String(read.key_fingerprint));
+    const joined = await bridge.checkEnrollment(0);
+    expect(joined).toMatchObject({ status: "connected", grant: { standing_actions: RECOMMENDED_ACTIONS, notify: { kind: "none" } } });
+    expect(String(joined.next)).toContain("in effect");
+    expect(bridge.mode).toBe("member");
+    expect(store.state).toMatchObject({ grant: { standing_actions: RECOMMENDED_ACTIONS } });
+    expect(store.state.pending_grant).toBeUndefined();
+    expect(store.state.enrollment).toBeUndefined();
+    // Housekeeping is covered without another prompt; anything else still asks.
+    await expect(bridge.createBoard({ board_id: `link.${tag()}`, description: "Covered." })).resolves.toMatchObject({ under_standing_grant: true });
+    expect(human.shown).toHaveLength(1);
+  });
+
+  it("sends nothing when the human declines the joining prompt, and asks for everything when they choose to be asked", async () => {
+    const inviter = await target!.enroll("decline-inviter");
+    const invite = await inviter.client.createInvite({ kind: "network" });
+    const { bridge, human, store } = await guestBridge(target!, local(invite.invite_url));
+    const email = `decline-${tag()}@example.test`;
+    human.decide = () => false;
+    await expect(bridge.enroll(email)).resolves.toMatchObject({ status: "declined" });
+    expect(await target!.latestCode!(email)).toBeUndefined();
+    expect(store.state.enrollment).toBeUndefined();
+    human.decide = () => true;
+    human.choose = "ask";
+    await bridge.enroll(email);
+    await bridge.confirmEnrollment(String(await target!.latestCode!(email)));
+    expect(store.state.grant).toMatchObject({ standing_actions: [] });
+    await bridge.createBoard({ board_id: `asked.${tag()}`, description: "Asked." });
+    expect(human.shown.map((item) => item.action)).toEqual(["join_network", "join_network", "create_board"]);
+  });
+
+  it("connects an address that already has an account through the same email, and leaves the invite unspent", async () => {
     const inviter = await target!.enroll("existing-inviter");
     const invite = await inviter.client.createInvite({ kind: "network" });
     const email = `existing-${tag()}@example.test`;
@@ -80,17 +148,55 @@ suite("agent-first bridge", () => {
     const first = await guestBridge(target!, local(other.invite_url));
     await first.bridge.enroll(email);
     await first.bridge.confirmEnrollment(String(await target!.latestCode!(email)));
+    // A code cannot connect an existing account.
     await expect(racing.bridge.confirmEnrollment(racingCode)).rejects.toThrow(/start_pairing/);
     expect(racing.store.state.enrollment).toBeUndefined();
 
     const late = await guestBridge(target!, local(invite.invite_url));
-    await expect(late.bridge.enroll(email)).rejects.toThrow(/already uses this address[\s\S]*start_pairing[\s\S]*not spent/);
-    expect(late.store.state.enrollment).toBeUndefined();
-    expect(late.bridge.mode).toBe("guest");
-    // The CLI says the same and names its own command.
-    const cli = await guestBridge(target!, local(invite.invite_url));
-    await expect(joinFromLink(cli.store, local(invite.invite_url), { email, fetchImpl: cli.bridge.client.fetchImpl, clock: target!.clock })).rejects.toThrow(/dossy-bridge pair/);
+    const read = await late.bridge.readInvitation();
+    await expect(late.bridge.enroll(email)).resolves.toMatchObject({ status: "code_sent", next: expect.stringContaining("check_enrollment") });
+    expect(await target!.latestCode!(email)).toBeUndefined();
+    await target!.approveEnrollmentLink!(email, String(read.key_fingerprint));
+    const joined = await late.bridge.checkEnrollment(0);
+    expect(joined).toMatchObject({ status: "connected", existing_account: true });
+    expect(String(joined.next)).toContain("pass it to someone else");
+    // The account's private boards were adopted (it has none here; pairing covers one that does).
+    expect(late.store.state.followed).toEqual([]);
     await expect(inviter.client.invitation(parseJoinLink(local(invite.invite_url)).invite)).resolves.toMatchObject({ kind: "network" });
+  });
+
+  it("pairs by itself when a network refuses an address that already has an account", async () => {
+    const inviter = await target!.enroll("refusing-inviter");
+    const invite = await inviter.client.createInvite({ kind: "network" });
+    const member = `refused-${tag()}@example.test`;
+    const joined = await guestBridge(target!, local(invite.invite_url));
+    await joined.bridge.enroll(member);
+    await joined.bridge.confirmEnrollment(String(await target!.latestCode!(member)));
+
+    const other = await inviter.client.createInvite({ kind: "network" });
+    const guest = await guestBridge(target!, local(other.invite_url), [], codeOnly);
+    const answer = await guest.bridge.enroll(member);
+    expect(answer).toMatchObject({ status: "pairing", existing_account: true, user_code: expect.any(String), pairing_url: expect.any(String), next: expect.stringContaining("check_pairing") });
+    expect(String(answer.next)).toContain("invite was not spent");
+    expect(guest.store.state.enrollment).toBeUndefined();
+    expect(guest.store.state.pending_grant).toBeDefined();
+    // The CLI says the same and names its own command.
+    const cli = await guestBridge(target!, local(other.invite_url));
+    await expect(joinFromLink(cli.store, local(other.invite_url), { email: member, fetchImpl: codeOnly(cli.bridge.client.fetchImpl!), clock: target!.clock })).rejects.toThrow(/dossy-bridge pair/);
+  });
+
+  it("starts with no invite and takes the one the human gives it", async () => {
+    const inviter = await target!.enroll("later-inviter");
+    const invite = await inviter.client.createInvite({ kind: "network", label: "Ana" });
+    const dir = await mkdtemp(join(tmpdir(), "dossy-blank-"));
+    const store = await Keystore.create(join(dir, "bridge.json"), LOCAL);
+    const sponsor = await target!.enroll(`sponsor-${tag()}`);
+    const bridge = await Bridge.start(store, new ScriptedHuman(), { fetchImpl: sponsor.client.fetchImpl, clock: target!.clock });
+    expect(bridge.mode).toBe("guest");
+    await expect(bridge.readInvitation()).rejects.toThrow(/pass it to read_invitation/);
+    await expect(bridge.networkStatus()).resolves.toMatchObject({ mode: "guest", invite_configured: false });
+    await expect(bridge.readInvitation(local(invite.invite_url))).resolves.toMatchObject({ kind: "network", inviter_label: "Ana" });
+    expect(store.state.pending_invite).toBe(local(invite.invite_url));
   });
 
   it("pairs a guest with its human's account, switches to member tools, and leaves the invite unspent", async () => {
@@ -141,7 +247,7 @@ suite("agent-first bridge", () => {
   });
 
   it("asks the human for everything outside the grant, and always for the grant itself", async () => {
-    const { bridge, human, store } = await joinedBridge(target!);
+    const { bridge, human, store } = await joinedBridge(target!, [], "ask");
     const board = `grant.${tag()}`;
     await bridge.createBoard({ board_id: board, description: "Grant check." });
     expect(human.shown.map((item) => item.action)).toEqual(["create_board"]);

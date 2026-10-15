@@ -11,9 +11,17 @@ export type ApprovalRequest = {
   disclosure: unknown;
   permits: string[];
   notes?: string[];
+  /** One question the human answers in the same approval, with a preselected answer. */
+  choice?: { title: string; options: { value: string; label: string }[]; default: string };
 };
 
-export type ApprovalResult = { approved: boolean; channel: string };
+/** `choice` is the human's answer to the approval's choice, when it has one and they approved. */
+export type ApprovalResult = { approved: boolean; channel: string; choice?: string };
+
+function chosen(approval: ApprovalRequest, value: unknown): string | undefined {
+  if (!approval.choice) return undefined;
+  return approval.choice.options.some((option) => option.value === value) ? String(value) : approval.choice.default;
+}
 
 /**
  * Collects a human decision outside the model. The bridge signs an action only after an approver
@@ -36,6 +44,7 @@ export function renderApproval(approval: ApprovalRequest): string {
     "This permits:",
     ...approval.permits.map((item) => `- ${item}`),
     ...(approval.notes?.length ? ["", ...approval.notes.map((item) => `Note: ${item}`)] : []),
+    ...(approval.choice ? ["", `${approval.choice.title}`, ...approval.choice.options.map((option) => `- ${option.value}: ${option.label}`)] : []),
     "",
     "Nothing is sent unless you approve. Declining sends nothing and leaves no trace on the network.",
   ].join("\n");
@@ -48,21 +57,34 @@ export class ElicitationApprover implements Approver {
   constructor(private readonly elicit: Elicit) {}
 
   async request(approval: ApprovalRequest): Promise<ApprovalResult> {
+    const choice = approval.choice
+      ? {
+        choice: {
+          type: "string",
+          title: approval.choice.title,
+          description: approval.choice.options.map((option) => `${option.value}: ${option.label}`).join(" "),
+          enum: approval.choice.options.map((option) => option.value),
+          default: approval.choice.default,
+        },
+      }
+      : {};
     const response = await this.elicit({
       message: renderApproval(approval),
       requestedSchema: {
         type: "object",
         properties: {
           approve: { type: "boolean", title: "Send exactly this", description: "Approve this one action. Leave unchecked or decline to send nothing." },
+          ...choice,
         },
         required: ["approve"],
       },
     });
-    return { approved: response.action === "accept" && response.content?.approve === true, channel: "elicitation" };
+    const approved = response.action === "accept" && response.content?.approve === true;
+    return { approved, channel: "elicitation", ...(approved && approval.choice ? { choice: chosen(approval, response.content?.choice) } : {}) };
   }
 }
 
-type Pending = { approval: ApprovalRequest; nonce: string; resolve: (approved: boolean) => void; settled: boolean; timer: NodeJS.Timeout };
+type Pending = { approval: ApprovalRequest; nonce: string; resolve: (decision: { approved: boolean; choice?: string }) => void; settled: boolean; timer: NodeJS.Timeout };
 
 /**
  * Serves the approval on 127.0.0.1 and opens it in the user's browser. The page address carries a
@@ -84,14 +106,14 @@ export class BrowserApprover implements Approver {
   async request(approval: ApprovalRequest): Promise<ApprovalResult> {
     const server = await this.listen();
     const token = randomId();
-    const decision = new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), this.options.timeoutMs ?? 10 * 60_000);
+    const decision = new Promise<{ approved: boolean; choice?: string }>((resolve) => {
+      const timer = setTimeout(() => resolve({ approved: false }), this.options.timeoutMs ?? 10 * 60_000);
       this.pending.set(token, { approval, nonce: randomId(), resolve, settled: false, timer });
     });
     server.ref();
     try {
       await (this.options.open ?? openInBrowser)(`${this.origin}/approve/${token}`);
-      return { approved: await decision, channel: "browser" };
+      return { ...(await decision), channel: "browser" };
     } finally {
       clearTimeout(this.pending.get(token)?.timer);
       this.pending.delete(token);
@@ -103,7 +125,7 @@ export class BrowserApprover implements Approver {
   async close(): Promise<void> {
     for (const pending of this.pending.values()) {
       pending.settled = true;
-      pending.resolve(false);
+      pending.resolve({ approved: false });
     }
     await new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
     this.server = undefined;
@@ -158,7 +180,7 @@ export class BrowserApprover implements Approver {
       }
       pending.settled = true;
       const approved = form.get("decision") === "approve";
-      pending.resolve(approved);
+      pending.resolve({ approved, ...(approved && pending.approval.choice ? { choice: chosen(pending.approval, form.get("choice")) } : {}) });
       response.writeHead(200, headers).end(page(approved ? "Approved" : "Declined", approved
         ? "<p>Approved. Your agent will send exactly what you saw. You can close this tab.</p>"
         : "<p>Declined. Nothing was sent. You can close this tab.</p>"));
@@ -177,19 +199,24 @@ body{font:16px/1.5 system-ui,sans-serif;max-width:44rem;margin:2rem auto;padding
 pre{background:#fff;border:1px solid #ddd;border-radius:8px;padding:1rem;overflow:auto;white-space:pre-wrap;word-break:break-word}
 .actions{display:flex;gap:.75rem;margin-top:1.5rem}button{font:inherit;padding:.6rem 1.2rem;border-radius:8px;border:1px solid #888;background:#fff;cursor:pointer}
 button[value=approve]{background:#1d1d1f;color:#fff;border-color:#1d1d1f}.muted{color:#666}
+fieldset{border:1px solid #ddd;border-radius:8px;padding:.75rem 1rem}fieldset label{display:block;margin:.4rem 0}
 @media (prefers-color-scheme:dark){body{background:#161616;color:#eee}pre{background:#1f1f1f;border-color:#333}button{background:#222;color:#eee}button[value=approve]{background:#eee;color:#111}.muted{color:#aaa}}
 </style></head><body><h1>${escapeHtml(title)}</h1>${body}</body></html>`;
 }
 
 function approvalPage(approval: ApprovalRequest, nonce: string): string {
   const notes = approval.notes?.length ? `<ul>${approval.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>` : "";
+  const choice = approval.choice
+    ? `<fieldset><legend>${escapeHtml(approval.choice.title)}</legend>${approval.choice.options.map((option) =>
+      `<label><input type="radio" name="choice" value="${escapeHtml(option.value)}"${option.value === approval.choice?.default ? " checked" : ""}> ${escapeHtml(option.label)}</label>`).join("")}</fieldset>`
+    : "";
   return page(approval.title, `
 <p><strong>To:</strong> ${escapeHtml(approval.recipient)}</p>
 <p>Exactly this will be sent:</p><pre>${escapeHtml(JSON.stringify(approval.disclosure, null, 2))}</pre>
 <p>This permits:</p><ul>${approval.permits.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>${notes}
 <p class="muted">Nothing is sent unless you approve. Declining sends nothing and leaves no trace on the network.</p>
-<form method="post" class="actions"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}">
-<button name="decision" value="approve">Approve and send</button><button name="decision" value="decline">Decline</button></form>`);
+<form method="post"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}">${choice}
+<div class="actions"><button name="decision" value="approve">Approve and send</button><button name="decision" value="decline">Decline</button></div></form>`);
 }
 
 export async function openInBrowser(url: string): Promise<void> {

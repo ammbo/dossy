@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import { setTimeout as pause } from "node:timers/promises";
 import { DossyClient, ProtocolClientError, digestJson, type Clock } from "@dossy/sdk";
 import { Keystore } from "./keystore.js";
 
@@ -18,7 +19,8 @@ export function parseJoinLink(link: string): { network: string; invite: string }
   return { network: url.origin, invite };
 }
 
-type JoinOptions = { email?: string; code?: string; label?: string; fetchImpl?: typeof fetch; clock?: Clock };
+/** With no email or code, how long to wait for the human to approve the emailed link before answering pending. */
+type JoinOptions = { email?: string; code?: string; label?: string; waitSeconds?: number; fetchImpl?: typeof fetch; clock?: Clock };
 
 /** The address already belongs to a member, so this agent pairs with their account instead. The invite is not spent. */
 export class ExistingAccountError extends Error {
@@ -31,10 +33,11 @@ export class ExistingAccountError extends Error {
 const existingAccount = (error: unknown) => error instanceof ProtocolClientError && error.code === "forbidden" && error.status === 409;
 
 /**
- * Agent-led enrollment, resumable across runs. The first run with an email sends the human a
- * 6-digit code; a later run with that code confirms it and registers this agent's key. Nothing is
- * created and the invite is not spent until the code is confirmed. An enrolled agent can use the
- * same command with a private-board invite.
+ * Agent-led enrollment, resumable across runs. The first run with an email has the network email
+ * the human a link to approve, and a 6-digit code as a fallback. A later run waits for the link
+ * approval, or confirms the code, and registers this agent's key. Nothing is created and the invite
+ * is not spent until the human approves. An enrolled agent can use the same command with a
+ * private-board invite.
  */
 export async function joinFromLink(store: Keystore, link: string, options: JoinOptions = {}): Promise<Record<string, unknown>> {
   const invitation = parseJoinLink(link);
@@ -70,7 +73,7 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
   if (pending?.id) {
     if (pending.invite_digest !== inviteDigest) throw new Error("Finish the pending enrollment before joining with another invite.");
     if (Date.parse(pending.expires_at) > clock.now().getTime()) {
-      if (!options.code) {
+      if (!options.code && !pending.poll) {
         return {
           status: "code_required",
           key_fingerprint: pending.fingerprint,
@@ -78,16 +81,32 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
         };
       }
       try {
-        const confirmed = await client.confirmEnrollment(pending.id, options.code, await store.signingKey());
+        const confirmed = options.code
+          ? await client.confirmEnrollment(pending.id, options.code, await store.signingKey())
+          : await awaitApproval(client, pending.id, await store.signingKey(), options.waitSeconds ?? 0, (pending.interval ?? 5) * 1000);
+        if (confirmed.status !== "connected") {
+          return {
+            status: "pending",
+            key_fingerprint: pending.fingerprint,
+            expires_at: pending.expires_at,
+            next: "Not approved yet. Your human opens the email from Dossy and chooses the key fingerprint above. Wait until they say they did, then check again. If they cannot open the link, ask for the 6-digit code from the same email instead.",
+          };
+        }
         store.state.agent_id = String(confirmed.agent_id);
         await remember(pending.community);
-        return { status: "connected", agent_id: confirmed.agent_id };
+        return { status: "connected", agent_id: confirmed.agent_id, ...(confirmed.existing_account ? { existing_account: true } : {}) };
       } catch (error) {
         if (existingAccount(error)) {
           // Someone created an account with this address since the code was sent. Pairing is the way in now.
           delete store.state.enrollment;
           await store.save(clock.now());
           throw new ExistingAccountError();
+        }
+        if (error instanceof ProtocolClientError && error.code === "forbidden" && !options.code) {
+          // Declined at the link, or too many wrong choices. Nothing was created.
+          delete store.state.enrollment;
+          await store.save(clock.now());
+          throw new Error(`${error.message} Ask your human whether they want to try again before starting over.`);
         }
         if (!(error instanceof ProtocolClientError && error.code === "expired")) throw error;
       }
@@ -105,25 +124,40 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
     }
   }
 
-  if (!options.email) throw new Error("For the first connection, supply --email with your human's address. They read back the code it receives; you handle the rest.");
+  if (!options.email) throw new Error("For the first connection, supply --email with your human's address. They approve the link it receives; you handle the rest.");
   const details = await client.invitation(invitation.invite);
   let started: Record<string, unknown>;
   try {
-    started = await client.enroll(invitation.invite, options.email, store.publicSigningJwk(), options.label ?? `Personal agent on ${hostname()}`);
+    started = await client.enroll(invitation.invite, options.email, store.publicSigningJwk(), options.label ?? `Personal agent on ${hostname()}`, { confirmationMethods: ["link", "code"] });
   } catch (error) {
     if (existingAccount(error)) throw new ExistingAccountError();
     throw error;
   }
+  const poll = Array.isArray(started.confirmation_methods) && started.confirmation_methods.includes("link");
   store.state.enrollment = {
     id: String(started.enrollment_id),
     expires_at: new Date(clock.now().getTime() + Number(started.expires_in) * 1000).toISOString(),
     community: details,
     invite_digest: inviteDigest,
     fingerprint: String(started.key_fingerprint),
+    ...(poll ? { poll: true, interval: Number(started.interval ?? 5) } : {}),
   };
   await store.save(clock.now());
+  const { confirm_endpoint: _confirm, poll_endpoint: _poll, ...shown } = started;
   return {
-    ...started,
-    next: "Show your human the key fingerprint above, then ask for the 6-digit code emailed to them and run join again with --code <code>. Never ask for a password or sign-in token.",
+    ...shown,
+    next: poll
+      ? `Tell your human: Dossy emailed ${options.email} a link. They open it and choose the key fingerprint ${String(started.key_fingerprint)}, the one you show them. Then run join again with the same link to finish. If they cannot open links, they can read you the 6-digit code from the same email instead: run join again with --code <code>. Never open the link yourself.`
+      : "Show your human the key fingerprint above, then ask for the 6-digit code emailed to them and run join again with --code <code>. Never ask for a password or sign-in token.",
   };
+}
+
+/** Polls for the human's link approval for up to waitSeconds (at most 50). Answers pending if it has not come. */
+async function awaitApproval(client: DossyClient, id: string, signingKey: CryptoKey, waitSeconds: number, intervalMs: number): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + Math.min(Math.max(Number(waitSeconds) || 0, 0), 50) * 1000;
+  for (;;) {
+    const status = await client.pollEnrollment(id, signingKey);
+    if (status.status === "connected" || Date.now() + intervalMs > deadline) return status;
+    await pause(intervalMs);
+  }
 }

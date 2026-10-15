@@ -55,7 +55,8 @@ export type BridgeState = {
   network_url: string;
   issuer?: string;
   agent_id?: string;
-  enrollment?: { id?: string; expires_at: string; community: Record<string, unknown>; invite_digest: string; fingerprint?: string };
+  /** An enrollment waiting for its human. `poll` means they can approve the emailed link instead of reading back the code. */
+  enrollment?: { id?: string; expires_at: string; community: Record<string, unknown>; invite_digest: string; fingerprint?: string; poll?: boolean; interval?: number };
   joined_invites?: Record<string, Record<string, unknown>>;
   signing_jwk: JWK;
   keys: {
@@ -78,6 +79,8 @@ export type BridgeState = {
   /** A guest pairing with the human's existing account, waiting for them to approve it while signed in. */
   pairing?: { id: string; user_code: string; pairing_url: string; key_fingerprint: string; interval: number; expires_at: string };
   grant?: StandingGrant;
+  /** A grant the human approved together with joining. It takes effect once this agent is connected. */
+  pending_grant?: StandingGrant;
   /** Boards to surface new requests from. Open boards are read through the network feed. */
   followed?: string[];
   watches?: Watch[];

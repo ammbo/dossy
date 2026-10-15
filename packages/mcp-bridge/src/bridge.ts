@@ -59,6 +59,15 @@ export const GRANTABLE_ACTIONS = [
   "restore_invites",
 ];
 
+/**
+ * The housekeeping a human is offered, preselected, when joining: creating boards, rating
+ * connections, flagging requests, and proposing and supporting merges.
+ */
+export const RECOMMENDED_ACTIONS = ["create_board", "propose_merge", "rate_connection", "report_abuse", "support_merge"];
+
+/** The network a bridge joins when its invite is a bare code, or when it starts with no invite. */
+export const DEFAULT_NETWORK = "https://dossy.ai";
+
 /** Text from another party. It is shown to the model as data with this label. */
 export function untrusted(value: unknown): unknown {
   if (value === undefined || value === null) return value;
@@ -81,7 +90,7 @@ export class Bridge {
   private moderator?: boolean;
 
   private constructor(
-    readonly client: DossyClient,
+    public client: DossyClient,
     readonly store: Keystore,
     private approver: Approver,
     private readonly clock: Clock,
@@ -89,14 +98,11 @@ export class Bridge {
   ) {}
 
   /**
-   * Starts as a member when this state holds an enrolled agent, or as a guest when it holds only a
-   * network invite from the agent's setup. A guest can read the invite and the open catalog and
-   * enroll; nothing else.
+   * Starts as a member when this state holds an enrolled agent, or as a guest otherwise. A guest
+   * takes its invite from the setup or from read_invitation, reads the invite and the open catalog,
+   * and enrolls or pairs; nothing else.
    */
   static async start(store: Keystore, approver: Approver, options: BridgeOptions = {}): Promise<Bridge> {
-    if (!store.state.agent_id && !store.state.pending_invite) {
-      throw new ToolError("This bridge is not enrolled. Add the invite to its setup (--invite <url>), or run `dossy-bridge join <invite-url> --email <address>`.");
-    }
     const clock = options.clock ?? { now: () => new Date() };
     const client = new DossyClient({
       networkUrl: store.state.network_url,
@@ -147,49 +153,132 @@ export class Bridge {
   }
 
   private requireMember(): void {
-    if (this.mode !== "member") throw new ToolError("Finish joining first: call enroll, then confirm_enrollment with the code your human reads back. If they already have an account, call start_pairing instead.");
+    if (this.mode !== "member") throw new ToolError("Finish joining first: call enroll, then check_enrollment once your human approves the emailed link. If they have no invite but already have an account, call start_pairing instead.");
   }
 
   // Guest onboarding. The script lives in the guest instructions; these are its steps.
 
   private inviteCode(): string {
     const link = this.store.state.pending_invite;
-    if (!link) throw new ToolError("No invite is configured for this bridge.");
+    if (!link) throw new ToolError("No invite is configured. Ask your human for the invite link or code a member gave them, and pass it to read_invitation. If they have no invite but already have an account, call start_pairing instead.");
     return parseJoinLink(link).invite;
   }
 
+  /**
+   * Takes the invite the human gave the agent when the setup had none. A guest that has started
+   * nothing yet may move to the invite's network.
+   */
+  private async useInvite(link: string): Promise<void> {
+    const invitation = parseJoinLink(link);
+    const state = this.store.state;
+    if (state.pending_invite === link) return;
+    if (state.enrollment || state.pairing) throw new ToolError("Finish or let expire the enrollment or pairing already started before using another invite.");
+    if (invitation.network !== state.network_url) {
+      state.network_url = invitation.network;
+      delete state.issuer;
+      this.client = new DossyClient({ networkUrl: invitation.network, fetchImpl: this.options.fetchImpl, clock: this.clock });
+      state.issuer = String((await this.client.discover()).issuer);
+    }
+    state.pending_invite = link;
+    await this.store.save(this.now());
+  }
+
   /** The invite and this agent's key fingerprint, for the agent to explain before enrolling. */
-  async readInvitation(): Promise<Row> {
+  async readInvitation(invite?: string): Promise<Row> {
+    if (this.mode === "member") return { status: "connected", note: "This agent is already a member. A network invite has nothing to do; use join_board for a private-board invite." };
+    if (invite?.trim()) await this.useInvite(invite.trim());
     const details = await this.client.invitation(this.inviteCode());
     const thumbprint = await calculateJwkThumbprint(this.store.publicSigningJwk());
     return {
       ...details,
       key_fingerprint: keyFingerprint(thumbprint),
-      next: "Explain to your human that enrolling binds this agent to Dossy under the key fingerprint above, name the inviter if shown, and ask which email to use. Then call enroll.",
+      next: "Explain to your human that joining binds this agent to Dossy under the key fingerprint above, name the inviter if shown, and ask which email to use. Then call enroll.",
     };
   }
 
-  /** Sends the emailed code. Nothing is created and the invite is not spent until the code is confirmed. */
+  /**
+   * One approval, in a prompt the model cannot answer, before anything is sent: joining under this
+   * agent's key, and what the agent may do without asking, with the recommended housekeeping
+   * preselected. Then the network emails the human a link to approve. Nothing is created and the
+   * invite is not spent until they do.
+   */
   async enroll(email: string, label?: string): Promise<Row> {
     if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
-    return this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { email, label, fetchImpl: this.options.fetchImpl, clock: this.clock }));
+    this.inviteCode();
+    const name = label?.trim() || `dossy-bridge on ${hostname()}`;
+    const pending = this.store.state.enrollment;
+    if (!pending || Date.parse(pending.expires_at) <= this.now().getTime()) {
+      const thumbprint = await calculateJwkThumbprint(this.store.publicSigningJwk());
+      const approved = await this.approveJoining(email.trim(), name, keyFingerprint(thumbprint));
+      if (!approved) return { status: "declined", note: "Your human declined. Nothing was sent and the network saw nothing." };
+    }
+    let result: Row;
+    try {
+      result = await joinFromLink(this.store, String(this.store.state.pending_invite), { email, label: name, fetchImpl: this.options.fetchImpl, clock: this.clock });
+    } catch (error) {
+      if (!(error instanceof ExistingAccountError)) throw error;
+      // This network refuses an address that already has an account. Pair with that account instead.
+      const pairing = await this.startPairing(name);
+      return {
+        ...pairing,
+        status: "pairing",
+        existing_account: true,
+        next: `An account already uses this address, so your human is already a member and the invite was not spent. ${String(pairing.next)}`,
+      };
+    }
+    if (result.status === "connected") return this.enrolled(result);
+    return result.next && this.store.state.enrollment?.poll
+      ? { ...result, next: "Tell your human: Dossy emailed them a link. They open it and choose this agent's key fingerprint, shown above. Then call check_enrollment, which waits for their approval. If they cannot open links, they can read you the 6-digit code from the same email: call confirm_enrollment with it. Never open the link or read their inbox yourself unless they tell you to." }
+      : { ...result, next: "Show your human the key fingerprint above, then ask for the 6-digit code emailed to them and call confirm_enrollment with it. Read it from their inbox only if they tell you to." };
   }
 
-  /** Confirms the code the human read back. On success this bridge becomes a member. */
+  private async approveJoining(email: string, label: string, fingerprint: string): Promise<boolean> {
+    const decision = await this.approver.request({
+      action: "join_network",
+      title: "Connect this agent to Dossy",
+      recipient: `${this.store.state.network_url}, which emails ${email} a link to approve`,
+      disclosure: { contact_email: email, agent_label: label, key_fingerprint: fingerprint },
+      permits: [
+        `Dossy emails ${email} a link. Opening it and choosing the fingerprint ${fingerprint} connects this agent: as a new member if that address has no account, or to the account it already has`,
+        "Your agent's key stays on this machine. The network learns your email address and this agent's public key, nothing else",
+      ],
+      notes: ["Publishing, offers, connections, messages, and invites always ask you, whatever you choose below. Notifications are off; your agent can ask you to change that later."],
+      choice: {
+        title: "What may your agent do without asking each time?",
+        options: [
+          { value: "recommended", label: "Housekeeping: create boards, rate connections, flag requests that break the rules, and propose or support board merges" },
+          { value: "ask", label: "Nothing: ask me before every action" },
+        ],
+        default: "recommended",
+      },
+    });
+    if (!decision.approved) return false;
+    this.store.state.pending_grant = {
+      standing_actions: decision.choice === "ask" ? [] : [...RECOMMENDED_ACTIONS],
+      notify: { kind: "none" },
+      approved_at: this.now().toISOString(),
+    };
+    await this.store.save(this.now());
+    return true;
+  }
+
+  /** Waits for the human to approve the emailed link. On approval this bridge becomes a member. */
+  async checkEnrollment(waitSeconds = 20): Promise<Row> {
+    if (this.mode === "member") return { status: "connected", agent_id: this.store.state.agent_id, note: "This agent is already enrolled." };
+    const pending = this.store.state.enrollment;
+    if (!pending) throw new ToolError("No enrollment is waiting. Call enroll first.");
+    if (!pending.poll) throw new ToolError("This network confirms joining with the emailed code only. Ask your human for the 6-digit code and call confirm_enrollment.");
+    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { waitSeconds, fetchImpl: this.options.fetchImpl, clock: this.clock }));
+    if (result.status !== "connected") return { ...result, next: "Not approved yet. Wait until your human says they chose the fingerprint at the link in the email, then call check_enrollment again." };
+    return this.enrolled(result);
+  }
+
+  /** Confirms the code the human read back, the fallback for a human who cannot open the link. */
   async confirmEnrollment(code: string): Promise<Row> {
     if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
     const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock }));
     if (result.status !== "connected") return result;
-    delete this.store.state.pending_invite;
-    this.store.state.followed ??= [];
-    this.store.state.watches ??= [];
-    await this.store.save(this.now());
-    this.client.agentId = this.store.state.agent_id;
-    this.client.signingKey = await this.store.signingKey();
-    return {
-      ...result,
-      next: "Ask your human for the standing grant (which housekeeping actions you may take without asking, and how to notify them) and call update_grant. Then read the catalog, follow fitting boards, and set watches for what they care about.",
-    };
+    return this.enrolled(result);
   }
 
   /** An address that already has an account cannot enroll again. Point the agent at pairing. */
@@ -202,6 +291,47 @@ export class Bridge {
       }
       throw error;
     }
+  }
+
+  private async enrolled(result: Row): Promise<Row> {
+    const existing = result.existing_account === true;
+    const grant = await this.becomeMember(String(this.store.state.agent_id));
+    return {
+      ...result,
+      ...(grant ? { grant } : {}),
+      next: [
+        existing
+          ? "Tell your human this agent is connected to the account they already had, and the invite was not used, so they can pass it to someone else."
+          : "Tell your human they joined.",
+        grant
+          ? "The standing grant they approved with joining is in effect; use update_grant only if they want to change it."
+          : "Ask your human for the standing grant and call update_grant; with no arguments it offers the recommended housekeeping.",
+        "Then read the catalog, propose boards that fit what you know about your human, follow the ones they agree to, and set watches for what they care about.",
+      ].join(" "),
+    };
+  }
+
+  /**
+   * Switches this bridge to member mode for a connected agent: clears onboarding state, applies the
+   * grant approved with joining, and adopts the member's private boards.
+   */
+  private async becomeMember(agentId: string): Promise<StandingGrant | undefined> {
+    const state = this.store.state;
+    state.agent_id = agentId;
+    delete state.pairing;
+    delete state.enrollment;
+    delete state.pending_invite;
+    const grant = state.pending_grant;
+    if (grant) {
+      state.grant = grant;
+      delete state.pending_grant;
+    }
+    await this.store.save(this.now());
+    this.client.agentId = agentId;
+    this.client.signingKey = await this.store.signingKey();
+    // An existing member may already belong to private boards. If listing them fails, the next start adopts them.
+    await this.adoptMemberBoards().catch(() => {});
+    return grant;
   }
 
   // Pairing, for a human who already has an account. The invite in the setup is left unspent.
@@ -229,7 +359,7 @@ export class Bridge {
       pairing_url: pairing.pairing_url,
       key_fingerprint: pairing.key_fingerprint,
       expires_at: pairing.expires_at,
-      next: "Show your human the code, key fingerprint, and pairing link above. They open the link while signed in to their account, check that the code and fingerprint match, and approve. Do not open or approve it yourself. Then call check_pairing. The invite is not spent; they can pass it to someone else.",
+      next: "Show your human the pairing link and this agent's key fingerprint. They open the link while signed in to their account and choose the fingerprint you show them. Do not open or approve it yourself. Then call check_pairing.",
     };
   }
 
@@ -250,7 +380,7 @@ export class Bridge {
         delete this.store.state.pairing;
         await this.store.save(this.now());
         throw new ToolError(error.code === "forbidden"
-          ? "Your human declined this pairing. Ask whether they want to try again before calling start_pairing."
+          ? "Your human declined this pairing, or chose a fingerprint that is not this agent's. Ask whether they want to try again before calling start_pairing."
           : "The pairing code expired before your human approved it. Call start_pairing for a new code.");
       }
       if (status.status === "approved" && typeof status.agent_id === "string") return this.paired(status.agent_id);
@@ -269,19 +399,21 @@ export class Bridge {
   }
 
   private async paired(agentId: string): Promise<Row> {
-    this.store.state.agent_id = agentId;
-    delete this.store.state.pairing;
-    delete this.store.state.enrollment;
-    delete this.store.state.pending_invite;
-    await this.store.save(this.now());
-    this.client.agentId = agentId;
-    this.client.signingKey = await this.store.signingKey();
-    // An existing member may already belong to private boards. If listing them fails, the next start adopts them.
-    await this.adoptMemberBoards().catch(() => {});
+    const hadInvite = Boolean(this.store.state.pending_invite);
+    const grant = await this.becomeMember(agentId);
     return {
       status: "connected",
       agent_id: agentId,
-      next: "Tell your human this agent is connected to their account and the invite was not used, so they can pass it to someone else; the --invite argument can come out of the setup. Then ask for the standing grant (which housekeeping actions you may take without asking, and how to notify them) and call update_grant, read the catalog, follow fitting boards, and set watches for what they care about.",
+      ...(grant ? { grant } : {}),
+      next: [
+        hadInvite
+          ? "Tell your human this agent is connected to their account and the invite was not used, so they can pass it to someone else; the --invite argument can come out of the setup."
+          : "Tell your human this agent is connected to their account.",
+        grant
+          ? "The standing grant they approved earlier is in effect; use update_grant only if they want to change it."
+          : "Ask your human for the standing grant and call update_grant; with no arguments it offers the recommended housekeeping.",
+        "Then read the catalog, follow fitting boards, and set watches for what they care about.",
+      ].join(" "),
     };
   }
 
@@ -295,7 +427,9 @@ export class Bridge {
         mode: "guest",
         network: this.store.state.network_url,
         issuer: discovery.issuer,
-        enrollment: this.store.state.enrollment ? { pending: true, key_fingerprint: this.store.state.enrollment.fingerprint } : null,
+        invite_configured: Boolean(this.store.state.pending_invite),
+        enrollment: this.store.state.enrollment ? { pending: true, key_fingerprint: this.store.state.enrollment.fingerprint, approve_by: this.store.state.enrollment.poll ? "link_or_code" : "code" } : null,
+        pending_grant: this.store.state.pending_grant ?? null,
         pairing: pairing ? { pending: true, user_code: pairing.user_code, pairing_url: pairing.pairing_url, key_fingerprint: pairing.key_fingerprint, expires_at: pairing.expires_at } : null,
       };
     }
@@ -610,7 +744,7 @@ export class Bridge {
    */
   async updateGrant(input: { standing_actions?: string[]; notify?: StandingGrant["notify"]; expires_in_days?: number }): Promise<Row> {
     this.requireMember();
-    const actions = [...new Set(input.standing_actions ?? [])];
+    const actions = [...new Set(input.standing_actions ?? RECOMMENDED_ACTIONS)];
     const unknown = actions.filter((action) => !GRANTABLE_ACTIONS.includes(action));
     if (unknown.length) throw new ToolError(`A standing grant cannot cover ${unknown.join(", ")}. Publishing, offers, connections, messages, and invites always need your human's approval.`);
     const notify = input.notify ?? { kind: "none" as const };

@@ -41,6 +41,11 @@ export interface ConformanceTarget {
   enrollWithInvite?(label: string, inviteCode: string): Promise<Party>;
   /** The last enrollment code emailed to an address, as its human would read it. Test networks only. */
   latestCode?(email: string): Promise<string | undefined>;
+  /**
+   * Approves the last enrollment link emailed to an address as its human would, by choosing the
+   * key fingerprint their agent shows. Test networks only.
+   */
+  approveEnrollmentLink?(email: string, keyFingerprint: string): Promise<void>;
   /** Grants the party's principal moderation of open boards. Role grants are operator-defined. */
   grantModerator?(party: Party): Promise<void>;
   /** Approves a pending agent pairing as the party's human would, while signed in. */

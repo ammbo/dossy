@@ -3,7 +3,7 @@ import { access } from "node:fs/promises";
 import { hostname } from "node:os";
 import { DossyClient, ProtocolClientError } from "@dossy/sdk";
 import { BrowserApprover, openInBrowser } from "./approval.js";
-import { Bridge } from "./bridge.js";
+import { Bridge, DEFAULT_NETWORK } from "./bridge.js";
 import { defaultStatePath, Keystore, withStateSession } from "./keystore.js";
 import { joinFromLink, parseJoinLink } from "./join.js";
 import { findTool, rejectSecretArguments, toolDefinitions } from "./tools.js";
@@ -11,16 +11,18 @@ import { serve } from "./server.js";
 
 const USAGE = `dossy-bridge: connect an existing agent to a DCP network.
 
-  dossy-bridge join <invite-url> --email <address>  Start enrollment; your human receives a 6-digit code
-  dossy-bridge join <invite-url> --code <code>      Finish enrollment with the code your human read back
+  dossy-bridge join <invite-url> --email <address>  Start enrollment; your human receives a link to approve
+  dossy-bridge join <invite-url> [--wait <secs>]    Wait for that approval and finish
+  dossy-bridge join <invite-url> --code <code>      Or finish with the 6-digit code from the same email
   dossy-bridge tools                              List available operations and argument schemas
   dossy-bridge call <tool> --json '<arguments>'    Participate directly through your agent's terminal
   dossy-bridge init --network <url>          Create local keys for a network
   dossy-bridge pair [--label <name>]         Connect this agent to an account you already have: approve the code in your browser
   dossy-bridge register --account-token <t>  Register with an account token instead of pairing
-  dossy-bridge serve [--invite <url>]        Run the MCP server on stdio (for your agent host). With an
-                                             invite and no enrollment yet, it starts as a guest that
-                                             walks your human through joining. DOSSY_INVITE also works.
+  dossy-bridge serve [--invite <url>]        Run the MCP server on stdio (for your agent host). Until this
+                                             agent is connected, it starts as a guest that walks your
+                                             human through joining. The invite can come from --invite,
+                                             DOSSY_INVITE, or later from the agent (read_invitation).
   dossy-bridge sync                          Fetch now, apply watches, hold matches for check_requests,
                                              and notify as the standing grant says (for cron)
   dossy-bridge status                        Show the network, agent, and queued actions
@@ -46,7 +48,9 @@ async function main(): Promise<void> {
       if (!link || link.startsWith("--")) throw new Error("join needs the full invite URL.");
       const invitation = parseJoinLink(link);
       const store = await exists(path) ? await Keystore.open(path) : await Keystore.create(path, invitation.network);
-      process.stdout.write(`${JSON.stringify(await joinFromLink(store, link, { email: flag("email"), code: flag("code"), label: flag("label") }), null, 2)}\n`);
+      // Run again with neither, and it waits up to --wait seconds (default 45) for the emailed link's approval.
+      const waitSeconds = flag("email") || flag("code") ? undefined : Number(flag("wait") ?? 45);
+      process.stdout.write(`${JSON.stringify(await joinFromLink(store, link, { email: flag("email"), code: flag("code"), label: flag("label"), waitSeconds }), null, 2)}\n`);
       return;
     }
     case "tools":
@@ -110,10 +114,9 @@ async function main(): Promise<void> {
       let store: Keystore;
       if (await exists(path)) {
         store = await Keystore.open(path);
-      } else if (invite) {
-        store = await Keystore.create(path, parseJoinLink(invite).network);
       } else {
-        throw new Error(`No bridge state at ${path}. Pass the invite you were given: dossy-bridge serve --invite <url>.`);
+        // With no invite in the setup, the agent passes the one its human gives it to read_invitation.
+        store = await Keystore.create(path, invite ? parseJoinLink(invite).network : DEFAULT_NETWORK);
       }
       // A spent invite left in the setup is inert once the agent is enrolled.
       if (invite && !store.state.agent_id && parseJoinLink(invite).network === store.state.network_url && store.state.pending_invite !== invite) {
