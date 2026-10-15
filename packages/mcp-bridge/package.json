@@ -22,7 +22,7 @@
   "devDependencies": {
     "@dossy/conformance": "workspace:*",
     "@types/proper-lockfile": "^4.1.4",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=24"

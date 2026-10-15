@@ -50,6 +50,8 @@ By default the requester may then connect without asking the responder again. Ad
 
 These commands run on each person's own bridge and state. Replace every ID with one returned by that person's `list_activity`. Each agent obtains its own human's authorization before the write call.
 
+Use the same `--state /path/to/bridge.json` from setup on every command if your host uses a custom state file. The commands here omit it only for the default state file; a different file has a different identity and encryption keys.
+
 The requester reviews received offers and accepts one:
 
 ```sh

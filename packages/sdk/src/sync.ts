@@ -22,6 +22,8 @@ export type SyncResult = {
 export const NETWORK_FEED = "network";
 
 type Lister = (cursor?: string) => Promise<Record<string, unknown>>;
+/** Local cache maintenance, including lifecycle changes that must not prompt twice. */
+type OnUpdate = (request: Record<string, unknown>) => Promise<void>;
 
 /**
  * Recovers every still-open request on one board and hands each new one to `onNew` once.
@@ -33,8 +35,9 @@ export async function syncBoard(
   boardId: string,
   store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
+  onUpdate?: OnUpdate,
 ): Promise<SyncResult> {
-  return syncFeed(client, boardId, (cursor) => client.listRequests(boardId, cursor), store, onNew);
+  return syncFeed(client, boardId, (cursor) => client.listRequests(boardId, cursor), store, onNew, onUpdate);
 }
 
 /**
@@ -46,9 +49,10 @@ export async function syncNetwork(
   store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
   options: FeedOptions = {},
+  onUpdate?: OnUpdate,
 ): Promise<SyncResult> {
   const key = options.class ? `${NETWORK_FEED}:${options.class}` : NETWORK_FEED;
-  return syncFeed(client, key, (cursor) => client.listFeed(cursor, options), store, onNew);
+  return syncFeed(client, key, (cursor) => client.listFeed(cursor, options), store, onNew, onUpdate);
 }
 
 async function syncFeed(
@@ -57,13 +61,14 @@ async function syncFeed(
   list: Lister,
   store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
+  onUpdate?: OnUpdate,
 ): Promise<SyncResult> {
   const result: RunState = { prompted: 0, failed: 0, attempted: new Set() };
   const done = (): SyncResult => ({ prompted: result.prompted, failed: result.failed });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await syncOnce(client, feed, list, store, onNew, result);
-      await retryPending(client, feed, store, onNew, result);
+      await syncOnce(client, feed, list, store, onNew, result, onUpdate);
+      await retryPending(client, feed, store, onNew, result, onUpdate);
       return done();
     } catch (error) {
       if (error instanceof ProtocolClientError && error.code === "cursor_expired") {
@@ -90,6 +95,7 @@ async function syncOnce(
   store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
   result: RunState,
+  onUpdate?: OnUpdate,
 ): Promise<void> {
   const state = { ...(store.cursors[feed] ?? { phase: "snapshot" as const }) };
   if (state.phase === "snapshot") {
@@ -97,7 +103,7 @@ async function syncOnce(
     for (;;) {
       const page = await list(cursor) as Page;
       if (page.feed_cursor && !state.feedCursor) state.feedCursor = page.feed_cursor;
-      for (const item of page.requests ?? []) await consider(client, feed, store, item, onNew, result);
+      for (const item of page.requests ?? []) await consider(client, feed, store, item, onNew, result, onUpdate);
       if (!page.next_cursor) break;
       cursor = page.next_cursor;
       store.cursors[feed] = { ...state, snapshotCursor: cursor };
@@ -108,7 +114,7 @@ async function syncOnce(
   }
   for (;;) {
     const page = await list(state.feedCursor) as Page;
-    for (const item of page.mutations ?? []) await consider(client, feed, store, item, onNew, result);
+    for (const item of page.mutations ?? []) await consider(client, feed, store, item, onNew, result, onUpdate);
     if (page.next_cursor) state.feedCursor = page.next_cursor;
     store.cursors[feed] = { ...state };
     if (!page.more) break;
@@ -122,6 +128,7 @@ async function consider(
   item: Listed,
   onNew: (request: Record<string, unknown>) => Promise<void>,
   result: RunState,
+  onUpdate?: OnUpdate,
 ): Promise<void> {
   // A tombstone for a request this agent never saw needs no fetch.
   if (item.state !== "open" && !Object.keys(store.seen).some((key) => key.endsWith(`:${item.request_id}`))) return;
@@ -130,9 +137,16 @@ async function consider(
     full = await client.getRequest(item.request_id);
   } catch (error) {
     // Hidden, removed, or purged before this agent fetched it.
-    if (error instanceof ProtocolClientError && error.status === 404) return;
+    if (error instanceof ProtocolClientError && error.status === 404) {
+      for (const [key, record] of Object.entries(store.seen)) {
+        if (key.endsWith(`:${item.request_id}`)) record.state = "gone";
+      }
+      await onUpdate?.({ request_id: item.request_id, state: "gone" });
+      return;
+    }
     throw error;
   }
+  await onUpdate?.(full);
   const key = `${String(full.origin ?? "")}:${item.request_id}`;
   const digest = String(full.document_digest ?? item.document_digest ?? "");
   const previous = store.seen[key];
@@ -173,6 +187,7 @@ async function retryPending(
   store: SyncStore,
   onNew: (request: Record<string, unknown>) => Promise<void>,
   result: RunState,
+  onUpdate?: OnUpdate,
 ): Promise<void> {
   for (const [key, record] of Object.entries(store.seen)) {
     if (record.prompted || record.state !== "open" || record.feed !== feed) continue;
@@ -183,11 +198,13 @@ async function retryPending(
     } catch (error) {
       if (error instanceof ProtocolClientError && error.status === 404) {
         record.state = "gone";
+        await onUpdate?.({ request_id: requestId, state: "gone" });
         continue;
       }
       throw error;
     }
     record.state = String(full.state);
+    await onUpdate?.(full);
     if (record.state === "open" && String(full.document_digest) === record.digest) await prompt(store, key, full, onNew, result);
   }
 }

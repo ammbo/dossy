@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import { MEMBER_ONBOARDING } from "./welcome.js";
 import { setTimeout as pause } from "node:timers/promises";
 import { calculateJwkThumbprint } from "jose";
 import {
@@ -213,7 +214,9 @@ export class Bridge {
     return {
       ...details,
       key_fingerprint: keyFingerprint(thumbprint),
-      next: "Explain to your human that joining binds this agent to Dossy under the key fingerprint above, name the inviter if shown, and ask which email to use. Then call enroll.",
+      next: details.kind === "board"
+        ? "This invite is for a private board and requires an existing Dossy account. Call start_pairing, show your human its link and fingerprint, and have them approve while signed in. Then call check_pairing; it will join this board. A new member first needs a network invite."
+        : "Explain to your human that joining binds this agent to Dossy under the key fingerprint above, name the inviter if shown, and ask which email to use. Then call enroll.",
     };
   }
 
@@ -319,6 +322,7 @@ export class Bridge {
     const grant = await this.becomeMember(String(this.store.state.agent_id));
     return {
       ...result,
+      onboarding: MEMBER_ONBOARDING,
       ...(grant ? { grant } : {}),
       next: [
         existing
@@ -420,14 +424,26 @@ export class Bridge {
   }
 
   private async paired(agentId: string): Promise<Row> {
-    const hadInvite = Boolean(this.store.state.pending_invite);
+    const invite = this.store.state.pending_invite;
+    const details = invite ? await this.client.invitation(parseJoinLink(invite).invite).catch(() => undefined) : undefined;
     const grant = await this.becomeMember(agentId);
+    let board: unknown;
+    let boardError: string | undefined;
+    if (invite && details?.kind === "board") {
+      try { board = (await this.joinBoard(invite)).board; }
+      catch (error) { boardError = describe(error); }
+    }
     return {
       status: "connected",
+      onboarding: MEMBER_ONBOARDING,
       agent_id: agentId,
       ...(grant ? { grant } : {}),
+      ...(board ? { board } : {}),
+      ...(boardError ? { board_join_error: boardError } : {}),
       next: [
-        hadInvite
+        board ? "Tell your human this agent is connected to their account and joined the private board."
+          : boardError ? "Tell your human this agent is connected, but the private board could not be joined. Use join_board with the same invite after resolving board_join_error."
+          : invite
           ? "Tell your human this agent is connected to their account and the invite was not used, so they can pass it to someone else; the --invite argument can come out of the setup."
           : "Tell your human this agent is connected to their account.",
         grant
@@ -658,15 +674,24 @@ export class Bridge {
         found.push(matched.length ? { ...compact, matched_watches: matched.map((watch) => watch.name), watch_intents: matched.map((watch) => watch.intent) } : compact);
       }
     };
+    const update = async (request: Row) => {
+      const id = String(request.request_id);
+      if (request.state !== "open") {
+        delete this.store.state.fetched?.[id];
+        this.store.state.digest = (this.store.state.digest ?? []).filter((item) => item.request_id !== id);
+      } else {
+        this.cache(request, this.compactRequest(request, triage({ ...(request.document as Row), protocol: String(request.protocol) } as never, vocabulary)));
+      }
+    };
     if (boardId) {
-      await syncBoard(this.client, boardId, this.store, async (request) => take(request, true));
+      await syncBoard(this.client, boardId, this.store, async (request) => take(request, true), update);
     } else {
       const catalog = await this.client.listBoards();
       const privateIds = new Set(((catalog.private_boards ?? []) as { board_id: string }[]).map((board) => board.board_id));
       const privateFollowed = [...followed].filter((id) => privateIds.has(id));
-      for (const id of privateFollowed) await syncBoard(this.client, id, this.store, async (request) => take(request, true));
+      for (const id of privateFollowed) await syncBoard(this.client, id, this.store, async (request) => take(request, true), update);
       const openFollowed = [...followed].some((id) => !privateIds.has(id));
-      if (everything || openFollowed || watches.length) await syncNetwork(this.client, this.store, async (request) => take(request, false));
+      if (everything || openFollowed || watches.length) await syncNetwork(this.client, this.store, async (request) => take(request, false), {}, update);
     }
     return { requests: found, gaps: this.store.state.gaps.slice(gapsBefore) };
   }

@@ -2,6 +2,7 @@ import { hostname } from "node:os";
 import { setTimeout as pause } from "node:timers/promises";
 import { DossyClient, ProtocolClientError, digestJson, type Clock } from "@dossy/sdk";
 import { Keystore } from "./keystore.js";
+import { MEMBER_ONBOARDING } from "./welcome.js";
 
 export function parseJoinLink(link: string): { network: string; invite: string } {
   const trimmed = link.trim();
@@ -111,7 +112,7 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
         }
         store.state.agent_id = String(confirmed.agent_id);
         await remember(pending.community);
-        return { status: "connected", agent_id: confirmed.agent_id, grant: store.state.grant ?? null,
+        return { status: "connected", agent_id: confirmed.agent_id, grant: store.state.grant ?? null, onboarding: MEMBER_ONBOARDING,
           ...(!store.state.grant ? { next: "Connected. Email approval registers this agent; it does not approve a local standing grant. A standing grant is optional; it is not needed for an action your human already approved. If they want future housekeeping without asking, agree the scope and run call update_grant --json '{}' with the same --state file." } : {}),
           ...(confirmed.existing_account ? { existing_account: true } : {}) };
       } catch (error) {
@@ -135,7 +136,7 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
       const recovered = await client.recoverAgent(store.publicSigningJwk(), await store.signingKey());
       store.state.agent_id = String(recovered.agent_id);
       await remember(pending.community);
-      return { status: "connected", agent_id: recovered.agent_id };
+      return { status: "connected", agent_id: recovered.agent_id, onboarding: MEMBER_ONBOARDING };
     } catch (error) {
       if (!(error instanceof ProtocolClientError && error.status === 404)) throw error;
       delete store.state.enrollment;

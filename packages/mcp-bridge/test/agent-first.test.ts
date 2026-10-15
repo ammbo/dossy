@@ -345,6 +345,46 @@ suite("agent-first bridge", () => {
     expect(seen.filter((url) => url.includes(`/boards/${board}/requests`))).toEqual([]);
   });
 
+  it("removes withdrawn and hidden requests from local search and queued digests", async () => {
+    const reader = await joinedBridge(target!);
+    const author = await joinedBridge(target!);
+    const moderator = await target!.enroll(`cache-moderator-${tag()}`);
+    await target!.grantModerator!(moderator);
+    const board = `cache.${tag()}`;
+    await author.bridge.createBoard({ board_id: board, description: "Cache lifecycle." });
+    await reader.bridge.follow(board);
+    const keyword = `lifecycle${tag()}`;
+    const withdrawn = await author.bridge.publishRequest({ board_id: board, class: "general", tags: [], criteria: {}, terms: { ask: `${keyword} withdrawn` } });
+    const hidden = await author.bridge.publishRequest({ board_id: board, class: "general", tags: [], criteria: {}, terms: { ask: `${keyword} hidden` } });
+    await reader.bridge.syncToDigest();
+    expect((await reader.bridge.search(keyword)).results).toHaveLength(2);
+    await author.bridge.withdraw("request", String(withdrawn.request_id));
+    await moderator.client.moderate("hide_request", { type: "request", id: String(hidden.request_id) });
+    expect((await reader.bridge.search(keyword)).results).toHaveLength(0);
+    const remaining = (await reader.bridge.checkRequests()).new_requests as Record<string, unknown>[];
+    expect(remaining.map((r) => r.request_id)).not.toContain(withdrawn.request_id);
+    expect(remaining.map((r) => r.request_id)).not.toContain(hidden.request_id);
+    await moderator.client.moderate("restore_request", { type: "request", id: String(hidden.request_id) });
+    expect((await reader.bridge.search(keyword)).results).toHaveLength(1);
+    expect((await reader.bridge.checkRequests()).new_requests).toHaveLength(0);
+  });
+
+  it("pairs an existing member from a private-board invite and completes that membership", async () => {
+    const organizer = await target!.enroll(`private-organizer-${tag()}`);
+    const member = await target!.enroll(`private-member-${tag()}`);
+    const board = `private.${tag()}`;
+    await organizer.client.createBoard({ board_id: board, description: "Private pilot group", visibility: "private" });
+    const invite = await organizer.client.createInvite({ kind: "board", board_id: board });
+    const { bridge } = await guestBridge(target!, local(invite.invite_url));
+    expect(String((await bridge.readInvitation()).next)).toContain("start_pairing");
+    const pairing = await bridge.startPairing();
+    await target!.approvePairing!(member, String(pairing.user_code));
+    const result = await bridge.checkPairing(0);
+    expect(result).toMatchObject({ status: "connected", board: { id: board }, onboarding: { first_steps: expect.any(Array), examples: expect.any(Array) } });
+    expect((await bridge.networkStatus()).followed_boards).toContain(board);
+    expect((await bridge.catalog()).private_boards).toEqual(expect.arrayContaining([expect.objectContaining({ board_id: board })]));
+  });
+
   it("upgrades a version 1 state file in place", async () => {
     const dir = await mkdtemp(join(tmpdir(), "dossy-v1-"));
     const path = join(dir, "bridge.json");
