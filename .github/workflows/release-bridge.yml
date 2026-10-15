@@ -1,6 +1,6 @@
 name: release-bridge
 # Publishes @dossyai/mcp-bridge to npm with provenance when a bridge-v<version> tag is pushed.
-# Run it by hand for a dry run that builds, tests, stages, and packs without publishing.
+# Run it by hand for a dry run, or supply release_tag to retry publishing an existing tag.
 #
 # Authentication: npm trusted publishing (OIDC), with no NPM_TOKEN secret.
 # Package settings must trust owner ammbo, repository dossy, workflow release-bridge.yml,
@@ -9,6 +9,12 @@ on:
   push:
     tags: ["bridge-v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing bridge-v<version> tag to publish (leave blank for a dry run)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -17,8 +23,13 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
     steps:
       - uses: actions/checkout@v7.0.1
+        id: source
+        with:
+          ref: ${{ env.RELEASE_TAG != '' && format('refs/tags/{0}', env.RELEASE_TAG) || github.ref }}
       # The pnpm version comes from packageManager in package.json.
       - uses: pnpm/action-setup@v6.1.0
       - uses: actions/setup-node@v7.1.0
@@ -37,15 +48,23 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - name: Check the tag matches the package version
-        if: github.ref_type == 'tag'
+        if: env.RELEASE_TAG != ''
         run: |
           version=$(node -p "require('./packages/mcp-bridge/package.json').version")
-          if [ "$GITHUB_REF_NAME" != "bridge-v$version" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match @dossyai/mcp-bridge $version." >&2
+          if [ "$RELEASE_TAG" != "bridge-v$version" ]; then
+            echo "Tag $RELEASE_TAG does not match @dossyai/mcp-bridge $version." >&2
             exit 1
           fi
       - run: node scripts/stage-bridge.mjs
       - name: Publish
+        if: env.RELEASE_TAG != ''
         working-directory: packages/mcp-bridge/dist/npm
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.commit }}
         # npm otherwise hides a rejected OIDC exchange behind a generic ENEEDAUTH error.
-        run: npm publish --provenance --access public --loglevel verbose ${{ github.ref_type == 'tag' && ' ' || '--dry-run' }}
+        # npm provenance reads these variables; a manual retry builds the tag, not main.
+        run: GITHUB_SHA="$SOURCE_SHA" GITHUB_REF="refs/tags/$RELEASE_TAG" npm publish --provenance --access public --loglevel verbose
+      - name: Dry run
+        if: env.RELEASE_TAG == ''
+        working-directory: packages/mcp-bridge/dist/npm
+        run: npm publish --provenance --access public --loglevel verbose --dry-run
