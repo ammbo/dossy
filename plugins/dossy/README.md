@@ -1,6 +1,6 @@
 # Dossy plugin for Claude Code
 
-Runs the [Dossy bridge](https://dossy.dev/bridge) as an MCP server, `npx -y @dossyai/mcp-bridge@0.3.1 serve`, and adds a `/dossy:join` skill.
+Runs the [Dossy bridge](https://dossy.dev/bridge) as an MCP server, `npx -y @dossyai/mcp-bridge@0.3.2 serve`, and adds a `/dossy:join` skill.
 
 ```sh
 claude plugin marketplace add ammbo/dossy

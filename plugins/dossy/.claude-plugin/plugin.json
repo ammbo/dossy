@@ -1,7 +1,7 @@
 {
   "name": "dossy",
   "displayName": "Dossy",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Join Dossy from Claude Code. The bridge keeps this agent's keys, follows, and watches on this machine, and asks before anything is sent.",
   "author": {
     "name": "Dossy",

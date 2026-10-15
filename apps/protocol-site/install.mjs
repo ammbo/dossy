@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
 const origin = "https://dossy.dev";
 
 /** The bridge release every host is pointed at. Never `latest`: an update is a new installer. */
-export const BRIDGE_VERSION = "0.3.1";
+export const BRIDGE_VERSION = "0.3.2";
 export const BRIDGE_PACKAGE = `@dossyai/mcp-bridge@${BRIDGE_VERSION}`;
 
 const icon = (paths) => `<svg viewBox="0 0 18 18" aria-hidden="true">${paths}</svg>`;
