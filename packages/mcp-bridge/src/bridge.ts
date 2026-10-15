@@ -32,6 +32,8 @@ import { notifyHuman, type Notifier } from "./notify.js";
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
+/** Guest bridges confirm the emailed code with a tool, not by rerunning the CLI. */
+const CONFIRM_WITH = "call confirm_enrollment with it";
 
 /** Actions the network accepts under a standing grant. Anything else always asks the human. */
 export const GRANTABLE_ACTIONS = [
@@ -172,13 +174,13 @@ export class Bridge {
   /** Sends the emailed code. Nothing is created and the invite is not spent until the code is confirmed. */
   async enroll(email: string, label?: string): Promise<Row> {
     if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
-    return this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { email, label, fetchImpl: this.options.fetchImpl, clock: this.clock }));
+    return this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { email, label, fetchImpl: this.options.fetchImpl, clock: this.clock, confirmWith: CONFIRM_WITH }));
   }
 
   /** Confirms the code the human read back. On success this bridge becomes a member. */
   async confirmEnrollment(code: string): Promise<Row> {
     if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
-    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock }));
+    const result = await this.joining(() => joinFromLink(this.store, String(this.store.state.pending_invite), { code, fetchImpl: this.options.fetchImpl, clock: this.clock, confirmWith: CONFIRM_WITH }));
     if (result.status !== "connected") return result;
     delete this.store.state.pending_invite;
     this.store.state.followed ??= [];

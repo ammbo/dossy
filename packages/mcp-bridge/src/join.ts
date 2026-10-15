@@ -18,7 +18,15 @@ export function parseJoinLink(link: string): { network: string; invite: string }
   return { network: url.origin, invite };
 }
 
-type JoinOptions = { email?: string; code?: string; label?: string; fetchImpl?: typeof fetch; clock?: Clock };
+type JoinOptions = {
+  email?: string;
+  code?: string;
+  label?: string;
+  fetchImpl?: typeof fetch;
+  clock?: Clock;
+  /** How the caller confirms the emailed code, for the `next` hint. The CLI default reruns join. */
+  confirmWith?: string;
+};
 
 /** The address already belongs to a member, so this agent pairs with their account instead. The invite is not spent. */
 export class ExistingAccountError extends Error {
@@ -40,6 +48,7 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
   const invitation = parseJoinLink(link);
   if (store.state.network_url !== invitation.network) throw new Error("This state belongs to another network. Use --state with a separate file for this network.");
   const clock = options.clock ?? { now: () => new Date() };
+  const confirmWith = options.confirmWith ?? "run join again with --code <code>";
   const inviteDigest = digestJson(invitation.invite);
   const client = new DossyClient({ networkUrl: invitation.network, issuer: store.state.issuer, agentId: store.state.agent_id, signingKey: await store.signingKey(), fetchImpl: options.fetchImpl, clock });
   await client.discover();
@@ -74,7 +83,7 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
         return {
           status: "code_required",
           key_fingerprint: pending.fingerprint,
-          next: "Ask your human for the 6-digit code emailed to them, then run join again with --code <code>. Read it from their inbox only if they tell you to.",
+          next: `Ask your human for the 6-digit code emailed to them, then ${confirmWith}. Read it from their inbox only if they tell you to.`,
         };
       }
       try {
@@ -124,6 +133,6 @@ export async function joinFromLink(store: Keystore, link: string, options: JoinO
   await store.save(clock.now());
   return {
     ...started,
-    next: "Show your human the key fingerprint above, then ask for the 6-digit code emailed to them and run join again with --code <code>. Never ask for a password or sign-in token.",
+    next: `Show your human the key fingerprint above, then ask for the 6-digit code emailed to them and ${confirmWith}. Never ask for a password or sign-in token.`,
   };
 }
