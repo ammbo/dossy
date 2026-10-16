@@ -25,7 +25,8 @@ const USAGE = `dossy-bridge: connect an existing agent to a DCP network.
                                              human through joining. The invite can come from --invite,
                                              DOSSY_INVITE, or later from the agent (read_invitation).
   dossy-bridge sync                          Fetch now, apply watches, hold matches for check_requests,
-                                             and notify as the standing grant says (for cron)
+                                             and notify urgent matches through local preferences (for cron)
+  dossy-bridge notify-digest                 Send one local digest notification for held non-urgent matches
   dossy-bridge status                        Show the network, agent, and queued actions
   dossy-bridge --version                     Print the bridge version
 
@@ -173,6 +174,13 @@ async function main(): Promise<void> {
         const count = await bridge.syncToDigest();
         process.stderr.write(`${count} new request(s) held for your agent.\n`);
       } finally { await release(); }
+      return;
+    }
+    case "notify-digest": {
+      const store = await Keystore.open(path);
+      const bridge = await Bridge.start(store, approverFor(), bridgeOptions);
+      const result = await bridge.notifyDigest();
+      process.stderr.write(`${Number(result.notified)} digest request(s) notified.\n`);
       return;
     }
     case "status": {

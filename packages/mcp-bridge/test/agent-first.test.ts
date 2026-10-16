@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { loadTarget, type ConformanceTarget } from "@dossy/conformance";
 import { randomId } from "@dossy/sdk";
-import { Bridge, joinFromLink, Keystore, parseJoinLink, RECOMMENDED_ACTIONS, type ApprovalRequest, type Approver, type MatchSummary } from "../src/index.js";
+import { Bridge, joinFromLink, Keystore, parseJoinLink, type ApprovalRequest, type Approver, type MatchSummary } from "../src/index.js";
 
 const target = await loadTarget();
 const suite = target?.latestCode ? describe : describe.skip;
@@ -15,12 +15,10 @@ afterAll(async () => target?.close());
 class ScriptedHuman implements Approver {
   shown: ApprovalRequest[] = [];
   decide: (approval: ApprovalRequest) => boolean = () => true;
-  /** The answer to an approval's choice. Undefined keeps the preselected one. */
-  choose?: string;
   async request(approval: ApprovalRequest) {
     this.shown.push(approval);
     const approved = this.decide(approval);
-    return { approved, channel: "test", ...(approved && approval.choice ? { choice: this.choose ?? approval.choice.default } : {}) };
+    return { approved, channel: "test", ...(approved && approval.choice ? { choice: approval.choice.default } : {}) };
   }
 }
 
@@ -42,14 +40,13 @@ async function guestBridge(network: ConformanceTarget, inviteUrl: string, notifi
 
 /**
  * A member bridge reached through the whole guest flow, the way a new member's agent joins. Its
- * human chose `choice` for the standing grant while joining; nothing shown so far is kept.
+ * human completed the normal join flow; nothing shown so far is kept.
  */
-async function joinedBridge(network: ConformanceTarget, notified: MatchSummary[] = [], choice = "recommended") {
+async function joinedBridge(network: ConformanceTarget, notified: MatchSummary[] = []) {
   const inviter = await network.enroll(`inviter-${tag()}`);
   const invite = await inviter.client.createInvite({ kind: "network", label: "A friend" });
   const guest = await guestBridge(network, local(invite.invite_url), notified);
   const email = `joined-${tag()}@example.test`;
-  guest.human.choose = choice;
   await guest.bridge.enroll(email, "Test agent");
   await guest.bridge.confirmEnrollment(String(await network.latestCode!(email)));
   guest.human.shown = [];
@@ -68,7 +65,7 @@ function codeOnly(fetchImpl: typeof fetch): typeof fetch {
 }
 
 suite("agent-first bridge", () => {
-  it("CLI enrollment leaves the grant null and CLI completion preserves an MCP-approved grant", async () => {
+  it("joining leaves the grant null in both CLI and MCP flows", async () => {
     for (const viaMcp of [false, true]) {
       const inviter = await target!.enroll(`cli-grant-inviter-${tag()}`);
       const invite = await inviter.client.createInvite({ kind: "network" });
@@ -81,11 +78,8 @@ suite("agent-first bridge", () => {
       const result = await joinFromLink(await Keystore.open(store.path), link, { ...options, code: String(await target!.latestCode!(email)) });
       expect(result.status).toBe("connected");
       const status = await bridge.networkStatus();
-      if (viaMcp) expect(status.grant).toMatchObject({ standing_actions: RECOMMENDED_ACTIONS });
-      else {
-        expect(status.grant).toBeNull();
-        expect(String(result.next)).toContain("call update_grant");
-      }
+      expect(status.grant).toBeNull();
+      expect(String(result.next)).toContain("call update_grant");
       expect((await Keystore.open(store.path)).state.pending_grant).toBeUndefined();
     }
   });
@@ -115,7 +109,7 @@ suite("agent-first bridge", () => {
     await expect(bridge.standing()).resolves.toMatchObject({ invites_remaining: 5 });
   });
 
-  it("joins with one approval prompt and the emailed link, and applies the grant approved with it", async () => {
+  it("joins with one approval prompt and the emailed link, without inferring a standing grant", async () => {
     const inviter = await target!.enroll("link-inviter");
     const invite = await inviter.client.createInvite({ kind: "network", label: "Ana" });
     const { bridge, human, store } = await guestBridge(target!, local(invite.invite_url));
@@ -124,29 +118,29 @@ suite("agent-first bridge", () => {
     const started = await bridge.enroll(email, "Claude Code");
     expect(started).toMatchObject({ status: "code_sent", key_fingerprint: read.key_fingerprint, next: expect.stringContaining("check_enrollment") });
     expect(started.confirm_endpoint).toBeUndefined();
-    // The one prompt before anything is sent: joining under this key, with the grant preselected.
+    // The one prompt before anything is sent: joining under this key only.
     expect(human.shown).toHaveLength(1);
     expect(human.shown[0]).toMatchObject({
       action: "join_network",
       disclosure: { contact_email: email, key_fingerprint: read.key_fingerprint },
-      choice: { default: "recommended", options: [expect.objectContaining({ value: "recommended" }), expect.objectContaining({ value: "ask" })] },
     });
+    expect(human.shown[0]!.choice).toBeUndefined();
     expect(await bridge.checkEnrollment(0)).toMatchObject({ status: "pending", next: expect.stringContaining("check_enrollment") });
-    await expect(bridge.networkStatus()).resolves.toMatchObject({ enrollment: { pending: true, approve_by: "link_or_code" }, pending_grant: { standing_actions: RECOMMENDED_ACTIONS } });
+    await expect(bridge.networkStatus()).resolves.toMatchObject({ enrollment: { pending: true, approve_by: "link_or_code" }, pending_grant: null });
     await target!.approveEnrollmentLink!(email, String(read.key_fingerprint));
     const joined = await bridge.checkEnrollment(0);
-    expect(joined).toMatchObject({ status: "connected", grant: { standing_actions: RECOMMENDED_ACTIONS, notify: { kind: "none" } } });
-    expect(String(joined.next)).toContain("in effect");
+    expect(joined).toMatchObject({ status: "connected" });
+    expect(String(joined.next)).toContain("No standing housekeeping grant");
     expect(bridge.mode).toBe("member");
-    expect(store.state).toMatchObject({ grant: { standing_actions: RECOMMENDED_ACTIONS } });
+    expect(store.state.grant).toBeUndefined();
     expect(store.state.pending_grant).toBeUndefined();
     expect(store.state.enrollment).toBeUndefined();
-    // Housekeeping is covered without another prompt; anything else still asks.
-    await expect(bridge.createBoard({ board_id: `link.${tag()}`, description: "Covered." })).resolves.toMatchObject({ under_standing_grant: true });
-    expect(human.shown).toHaveLength(1);
+    // Housekeeping asks until its separate standing grant is approved.
+    await expect(bridge.createBoard({ board_id: `link.${tag()}`, description: "Asked." })).resolves.toMatchObject({ sent: true });
+    expect(human.shown).toHaveLength(2);
   });
 
-  it("sends nothing when the human declines the joining prompt, and asks for everything when they choose to be asked", async () => {
+  it("sends nothing when the human declines the joining prompt, and asks for everything after joining", async () => {
     const inviter = await target!.enroll("decline-inviter");
     const invite = await inviter.client.createInvite({ kind: "network" });
     const { bridge, human, store } = await guestBridge(target!, local(invite.invite_url));
@@ -156,10 +150,9 @@ suite("agent-first bridge", () => {
     expect(await target!.latestCode!(email)).toBeUndefined();
     expect(store.state.enrollment).toBeUndefined();
     human.decide = () => true;
-    human.choose = "ask";
     await bridge.enroll(email);
     await bridge.confirmEnrollment(String(await target!.latestCode!(email)));
-    expect(store.state.grant).toMatchObject({ standing_actions: [] });
+    expect(store.state.grant).toBeUndefined();
     await bridge.createBoard({ board_id: `asked.${tag()}`, description: "Asked." });
     expect(human.shown.map((item) => item.action)).toEqual(["join_network", "join_network", "create_board"]);
   });
@@ -207,7 +200,7 @@ suite("agent-first bridge", () => {
     expect(answer).toMatchObject({ status: "pairing", existing_account: true, user_code: expect.any(String), pairing_url: expect.any(String), next: expect.stringContaining("check_pairing") });
     expect(String(answer.next)).toContain("invite was not spent");
     expect(guest.store.state.enrollment).toBeUndefined();
-    expect(guest.store.state.pending_grant).toBeDefined();
+    expect(guest.store.state.pending_grant).toBeUndefined();
     // The CLI says the same and names its own command.
     const cli = await guestBridge(target!, local(other.invite_url));
     await expect(joinFromLink(cli.store, local(other.invite_url), { email: member, fetchImpl: codeOnly(cli.bridge.client.fetchImpl!), clock: target!.clock })).rejects.toThrow(/dossy-bridge pair/);
@@ -275,7 +268,7 @@ suite("agent-first bridge", () => {
   });
 
   it("asks the human for everything outside the grant, and always for the grant itself", async () => {
-    const { bridge, human, store } = await joinedBridge(target!, [], "ask");
+    const { bridge, human, store } = await joinedBridge(target!);
     const board = `grant.${tag()}`;
     await bridge.createBoard({ board_id: board, description: "Grant check." });
     expect(human.shown.map((item) => item.action)).toEqual(["create_board"]);
@@ -283,8 +276,9 @@ suite("agent-first bridge", () => {
     await expect(bridge.updateGrant({ standing_actions: ["create_board"] })).resolves.toMatchObject({ updated: false });
     human.decide = () => true;
     await expect(bridge.updateGrant({ standing_actions: ["create_board", "submit_offer"] })).rejects.toThrow(/cannot cover submit_offer/);
-    await bridge.updateGrant({ standing_actions: ["create_board", "rate_connection"], notify: { kind: "command", command: "echo matched" } });
-    expect(human.shown.at(-1)).toMatchObject({ action: "update_grant", permits: expect.arrayContaining([expect.stringContaining("echo matched")]) });
+    await expect(bridge.updateGrant({ standing_actions: ["create_board"], notify: { kind: "desktop" } })).rejects.toThrow(/set_notification_preferences/);
+    await bridge.updateGrant({ standing_actions: ["create_board", "rate_connection"] });
+    expect(human.shown.at(-1)).toMatchObject({ action: "update_grant", permits: [expect.stringContaining("create_board, rate_connection")] });
     const shownBefore = human.shown.length;
     await expect(bridge.createBoard({ board_id: `grant.${tag()}`, description: "Covered." })).resolves.toMatchObject({ sent: true, under_standing_grant: true });
     expect(human.shown).toHaveLength(shownBefore);
@@ -292,6 +286,44 @@ suite("agent-first bridge", () => {
     await bridge.publishRequest({ board_id: board, class: "general", tags: [], criteria: {}, terms: { ask: "Who has run a pricing change?" } });
     expect(human.shown.at(-1)?.action).toBe("post_request");
     expect(human.shown.at(-1)?.recipient).toMatch(/Every Dossy member/);
+  });
+
+  it("asks before a notification command, never for none or desktop, and leaves the grant alone", async () => {
+    const { bridge, human, store } = await joinedBridge(target!);
+    await expect(bridge.configureNotifications({ urgent: { kind: "desktop" } })).resolves.toMatchObject({ updated: true });
+    expect(human.shown).toEqual([]);
+    human.decide = () => false;
+    await expect(bridge.configureNotifications({ digest: { kind: "command", command: "echo digest" } })).resolves.toMatchObject({ updated: false, declined: true });
+    expect(human.shown.at(-1)).toMatchObject({ action: "configure_notifications", permits: [expect.stringContaining("echo digest")] });
+    expect(store.state.notifications).toEqual({ urgent: { kind: "desktop" }, digest: { kind: "none" } });
+    human.decide = () => true;
+    await bridge.configureNotifications({ digest: { kind: "command", command: "echo digest" } });
+    expect(store.state.notifications?.digest).toEqual({ kind: "command", command: "echo digest" });
+    // Keeping an approved command while changing the other route asks nothing new.
+    const shown = human.shown.length;
+    await bridge.configureNotifications({ urgent: { kind: "none" }, digest: { kind: "command", command: "echo digest" } });
+    expect(human.shown).toHaveLength(shown);
+    expect(store.state.grant).toBeUndefined();
+  });
+
+  it("keeps invite notes on this machine and shows them beside the network's invite status", async () => {
+    const { bridge, human } = await joinedBridge(target!);
+    const seen: string[] = [];
+    const original = bridge.client.fetchImpl;
+    bridge.client.fetchImpl = async (input, init) => {
+      seen.push(`${String(input)} ${String(init?.body ?? "")}`);
+      return original(input, init);
+    };
+    const note = `For Priya${tag()}, met at the pricing meetup`;
+    const created = await bridge.createInvite("From Ana", note);
+    expect(human.shown.at(-1)).toMatchObject({ action: "create_invite", disclosure: { recipient_note_local_only: note } });
+    const inviteId = String(created.invite_id);
+    await bridge.recordInviteSent(inviteId);
+    const listed = (await bridge.listInvites()).invites as Record<string, unknown>[];
+    expect(listed.find((invite) => invite.invite_id === inviteId)).toMatchObject({ local_note: note, local_status: "sent" });
+    expect(String(created.invite_url)).not.toContain("Priya");
+    expect(seen.length).toBeGreaterThan(0);
+    for (const call of seen) expect(call).not.toContain("Priya");
   });
 
   it("matches watches and searches on this machine, and sends no search term or watch to the network", async () => {
@@ -307,13 +339,13 @@ suite("agent-first bridge", () => {
       seen.push(`${String(input)} ${String(init?.body ?? "")}`);
       return original(input, init);
     };
-    await watcher.bridge.setWatch({ name: "secret-watch", intent: "My human is hiring for a role nobody knows about.", keywords_any: [keyword] });
+    await watcher.bridge.setWatch({ name: "secret-watch", intent: "My human is hiring for a role nobody knows about.", keywords_any: [keyword], priority: "urgent" });
     await watcher.bridge.syncToDigest();
     expect(notified).toEqual([]);
     await author.bridge.publishRequest({ board_id: board, class: "general", tags: ["topic:ops"], criteria: {}, terms: { ask: `Anyone running ${keyword} in production?` } });
     await author.bridge.publishRequest({ board_id: board, class: "general", tags: ["topic:ops"], criteria: {}, terms: { ask: "Unrelated question about invoices." } });
     expect(await watcher.bridge.syncToDigest()).toBe(1);
-    expect(notified).toEqual([{ count: 1, watches: ["secret-watch"] }]);
+    expect(notified).toEqual([{ count: 1, watches: ["secret-watch"], route: "urgent" }]);
     const found = await watcher.bridge.checkRequests();
     expect((found.new_requests as Record<string, unknown>[])[0]).toMatchObject({ board_id: board, matched_watches: ["secret-watch"] });
     const results = await watcher.bridge.search("invoices question");
@@ -324,6 +356,71 @@ suite("agent-first bridge", () => {
       expect(call).not.toContain("secret-watch");
       expect(call).not.toContain("invoices");
     }
+  });
+
+  it("keeps an upgraded bridge alerting on every sync until the human sets notification preferences", async () => {
+    const notified: MatchSummary[] = [];
+    const watcher = await joinedBridge(target!, notified);
+    const author = await joinedBridge(target!);
+    const board = `legacy.${tag()}`;
+    await author.bridge.createBoard({ board_id: board, description: "Legacy alerts." });
+    const keyword = `quokka${tag()}`;
+    // A bridge from before priorities saved its watches without one.
+    watcher.store.state.watches = [{ name: "old-watch", intent: "Saved before priorities.", keywords_any: [keyword] }];
+    await watcher.store.save(target!.clock.now());
+    const publish = (ask: string) => author.bridge.publishRequest({ board_id: board, class: "general", tags: [], criteria: {}, terms: { ask } });
+    await publish(`Who runs ${keyword}?`);
+    expect(await watcher.bridge.syncToDigest()).toBe(1);
+    expect(notified).toEqual([{ count: 1, watches: ["old-watch"], route: "urgent" }]);
+    // Setting preferences opts into routing: the old watch now waits for the digest.
+    await watcher.bridge.configureNotifications({ urgent: { kind: "desktop" }, digest: { kind: "desktop" } });
+    expect(watcher.human.shown).toEqual([]);
+    await publish(`Anyone else on ${keyword}?`);
+    expect(await watcher.bridge.syncToDigest()).toBe(1);
+    expect(notified).toHaveLength(1);
+    // The first alert went to a notifier that was off, so the digest announces both, once.
+    await expect(watcher.bridge.notifyDigest()).resolves.toMatchObject({ held: 2, notified: 2, route: "digest" });
+    expect(notified.at(-1)).toEqual({ count: 2, watches: ["old-watch"], route: "digest" });
+    await expect(watcher.bridge.notifyDigest()).resolves.toMatchObject({ held: 2, notified: 0 });
+    expect(notified).toHaveLength(2);
+    // Watches saved now always carry a priority. An urgent alert is not repeated by a later digest.
+    await watcher.bridge.setWatch({ name: "new-watch", intent: "Saved now.", keywords_any: [`unmatched${tag()}`] });
+    expect(watcher.store.state.watches?.find((watch) => watch.name === "new-watch")).toMatchObject({ priority: "digest" });
+    const hot = `hot${tag()}`;
+    await watcher.bridge.setWatch({ name: "hot-watch", intent: "Time-sensitive.", keywords_any: [hot], priority: "urgent" });
+    await publish(`Need ${hot} today`);
+    expect(await watcher.bridge.syncToDigest()).toBe(1);
+    expect(notified.at(-1)).toEqual({ count: 1, watches: ["hot-watch"], route: "urgent" });
+    await watcher.bridge.setWatch({ name: "hot-watch", intent: "Time-sensitive.", keywords_any: [hot], priority: "digest" });
+    await expect(watcher.bridge.notifyDigest()).resolves.toMatchObject({ held: 3, notified: 0 });
+    expect(notified).toHaveLength(3);
+    const drained = (await watcher.bridge.checkRequests()).new_requests as Record<string, unknown>[];
+    expect(drained).toHaveLength(3);
+    for (const item of drained) expect(item).not.toHaveProperty("notified_at");
+  });
+
+  it("offers renewal only for a request that ran its course, never a withdrawn or hidden one", async () => {
+    const author = await joinedBridge(target!);
+    const moderator = await target!.enroll(`renew-moderator-${tag()}`);
+    await target!.grantModerator!(moderator);
+    const board = `renew.${tag()}`;
+    await author.bridge.createBoard({ board_id: board, description: "Renewals." });
+    const publish = (ask: string) => author.bridge.publishRequest({ board_id: board, class: "general", tags: [], criteria: {}, terms: { ask }, expires_in_hours: 2 });
+    const expiring = await publish("Who has moved a product to usage-based pricing?");
+    const withdrawn = await publish("Withdrawn by its author.");
+    const hidden = await publish("Hidden by a moderator.");
+    await author.bridge.withdraw("request", String(withdrawn.request_id));
+    await moderator.client.moderate("hide_request", { type: "request", id: String(hidden.request_id) });
+    const renewals = async (bridge = author.bridge) => (await bridge.reviewFollowUps()).request_renewals as Record<string, unknown>[];
+    expect(await renewals()).toEqual([expect.objectContaining({ request_id: expiring.request_id, suggested_prompt: expect.stringContaining("before it expires") })]);
+    await target!.advanceTime!(3 * 3600_000);
+    // The saved draft survives a restart of the bridge.
+    const restarted = await Bridge.start(await Keystore.open(author.store.path), author.human, { fetchImpl: author.bridge.client.fetchImpl, clock: target!.clock });
+    expect(await renewals(restarted)).toEqual([expect.objectContaining({
+      request_id: expiring.request_id,
+      draft: expect.objectContaining({ terms: { ask: "Who has moved a product to usage-based pricing?" } }),
+      suggested_prompt: expect.stringContaining("repost"),
+    })]);
   });
 
   it("surfaces new requests on followed boards and keeps the follow list local", async () => {

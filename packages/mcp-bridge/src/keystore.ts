@@ -29,7 +29,15 @@ export type PendingSend = {
   queued_at: string;
   keep_until: string;
   /** Local bookkeeping to apply once the network acknowledges the action. */
-  effects?: { rename_reply_from?: string; retarget_ref?: string; screening?: string };
+  effects?: {
+    rename_reply_from?: string;
+    retarget_ref?: string;
+    screening?: string;
+    /** The original local request inputs, retained only until the request's key expires. */
+    request_draft?: LocalRequestDraft;
+    /** A private note about the person this invite was made for, stored after it is acknowledged. */
+    invite_note?: string;
+  };
   /** `standing` when the human's standing grant covered the action instead of a fresh approval. */
   mode?: "human" | "standing";
 };
@@ -44,6 +52,19 @@ export type StandingGrant = {
   notify: { kind: "none" | "desktop" | "command"; command?: string };
   expires_at?: string;
   approved_at: string;
+};
+
+/** A local-only route for match notifications. Command routes need explicit human approval. */
+export type NotificationChannel = { kind: "none" | "desktop" | "command"; command?: string };
+
+/** Urgent watch matches and ordinary digest matches can use different local routes. */
+export type NotificationPreferences = { urgent: NotificationChannel; digest: NotificationChannel };
+
+/** The inputs used for a published request, retained locally so an agent can ask about renewal. */
+export type LocalRequestDraft = {
+  input: Record<string, unknown>;
+  expires_at: string;
+  keep_until: string;
 };
 
 /** A request this agent fetched, kept only while open so the human can search what was seen. */
@@ -83,12 +104,18 @@ export type BridgeState = {
   grant?: StandingGrant;
   /** A grant the human approved together with joining. It takes effect once this agent is connected. */
   pending_grant?: StandingGrant;
+  /** Local match-notification routes. Existing grants provide a legacy fallback until this is set. */
+  notifications?: NotificationPreferences;
   /** Boards to surface new requests from. Open boards are read through the network feed. */
   followed?: string[];
   watches?: Watch[];
   fetched?: Record<string, FetchedRequest>;
   /** request_id → screening rules the human approved with that request. Offers that meet them may be accepted under `standing` authorization. */
   screening?: Record<string, { rules: string; expires_at: string }>;
+  /** Original local request inputs, available through the rating/renewal window only. */
+  request_drafts?: Record<string, LocalRequestDraft>;
+  /** Private invite notes, never sent to Dossy or included in invite links. */
+  invite_notes?: Record<string, { note: string; status: "created" | "sent"; updated_at: string }>;
 };
 
 const RECEIPT_LIMIT = 500;
@@ -245,6 +272,7 @@ export class Keystore implements SyncStore {
     this.state.digest = (this.state.digest ?? []).filter((item) => Date.parse(String(item.expires_at)) > now.getTime()).slice(-200);
     this.state.fetched = Object.fromEntries(Object.entries(this.state.fetched ?? {}).filter(([, item]) => Date.parse(item.expires_at) > now.getTime()).slice(-2000));
     this.state.screening = Object.fromEntries(Object.entries(this.state.screening ?? {}).filter(([, item]) => Date.parse(item.expires_at) > now.getTime()));
+    this.state.request_drafts = Object.fromEntries(Object.entries(this.state.request_drafts ?? {}).filter(([, item]) => live(item)));
   }
 }
 
@@ -287,7 +315,7 @@ function mergeValue(base: unknown, local: unknown, disk: unknown, field: string)
   if (same(base, local)) return structuredClone(disk);
   // These are complete human-approved decisions, not independently mergeable properties.
   // Combining one prompt's notifier with another prompt's actions could invent consent.
-  if (["grant", "pending_grant", "enrollment", "pairing"].includes(field)) return structuredClone(local);
+  if (["grant", "pending_grant", "notifications", "enrollment", "pairing"].includes(field)) return structuredClone(local);
   if (Array.isArray(local)) {
     const key = field === "followed" ? (item: unknown) => String(item)
       : field === "watches" ? (item: unknown) => String((item as Watch).name)

@@ -28,8 +28,8 @@ import {
 } from "@dossy/sdk";
 import { ExistingAccountError, joinFromLink, parseJoinLink } from "./join.js";
 import { AgentHostApprover, ApprovalTimeoutError, type Approver, type ApprovalRequest } from "./approval.js";
-import { withStateTask, type FetchedRequest, type Keystore, type PendingSend, type StandingGrant } from "./keystore.js";
-import { notifyHuman, type Notifier } from "./notify.js";
+import { withStateTask, type FetchedRequest, type Keystore, type NotificationChannel, type NotificationPreferences, type PendingSend, type StandingGrant } from "./keystore.js";
+import { notifyHuman, type MatchSummary, type Notifier, type NotificationRoute } from "./notify.js";
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
@@ -221,9 +221,9 @@ export class Bridge {
   }
 
   /**
-   * Joining uses consent obtained by the agent/host. Optional prompt mode separately asks about
-   * joining and offers the recommended standing housekeeping grant. Default mode infers no grant. Then the network emails the human a link to approve. Nothing is created and the
-   * invite is not spent until they do.
+   * Joining uses consent obtained by the agent/host. It never creates standing authority: a
+   * separate, deliberate update_grant is required. The network then emails the human a link to
+   * approve. Nothing is created and the invite is not spent until they do.
    */
   async enroll(email: string, label?: string): Promise<Row> {
     if (this.mode === "member") return { status: "connected", note: "This agent is already enrolled." };
@@ -264,25 +264,10 @@ export class Bridge {
         `Dossy emails ${email} a link. Opening it and choosing the fingerprint ${fingerprint} connects this agent: as a new member if that address has no account, or to the account it already has`,
         "Your agent's key stays on this machine. The network learns your email address and this agent's public key, nothing else",
       ],
-      notes: ["Publishing, offers, connections, messages, and invites always ask you, whatever you choose below. Notifications are off; your agent can ask you to change that later."],
-      choice: {
-        title: "What may your agent do without asking each time?",
-        options: [
-          { value: "recommended", label: "Housekeeping: create boards, rate connections, flag requests that break the rules, and propose or support board merges" },
-          { value: "ask", label: "Nothing: ask me before every action" },
-        ],
-        default: "recommended",
-      },
+      notes: ["Joining gives no standing authority. Your agent will ask before every outward action until you separately approve a limited standing grant. Notifications are off; your agent can ask you to configure them later."],
     });
     if (!decision.approved) return false;
-    // Joining through a trusted agent does not imply a standing grant for future actions.
-    if (decision.channel === "agent_host") return true;
-    this.store.state.pending_grant = {
-      standing_actions: decision.choice === "ask" ? [] : [...RECOMMENDED_ACTIONS],
-      notify: { kind: "none" },
-      approved_at: this.now().toISOString(),
-    };
-    await this.store.save(this.now());
+    // Joining through any host does not imply a standing grant for future actions.
     return true;
   }
 
@@ -481,6 +466,7 @@ export class Bridge {
       followed_boards: this.store.state.followed ?? [],
       watches: (this.store.state.watches ?? []).map((watch) => watch.name),
       grant: this.store.state.grant ?? null,
+      notification_preferences: this.notificationPreferences(),
       ...(!this.store.state.grant ? { grant_next: "No standing grant has been approved on this machine. Email approval connects the agent only. A standing grant is optional; the agent obtains authorization before each write. To authorize future housekeeping, agree its scope with your human and call update_grant with this state file." } : {}),
       unreported_gaps: this.store.state.gaps,
       queued_actions: this.store.state.outbox.map((item) => ({ action: item.method, queued_at: item.queued_at })),
@@ -550,7 +536,8 @@ export class Bridge {
     this.requireMember();
     if (!watch.name?.trim() || !watch.intent?.trim()) throw new ToolError("A watch needs a name and the human's intent in their words.");
     const boards = watch.boards?.map((board) => this.boardId(board));
-    const cleaned: Watch = { ...watch, name: watch.name.trim().slice(0, 60), ...(boards ? { boards } : {}) };
+    if (watch.priority && watch.priority !== "urgent" && watch.priority !== "digest") throw new ToolError("Watch priority must be urgent or digest.");
+    const cleaned: Watch = { ...watch, name: watch.name.trim().slice(0, 60), priority: watch.priority ?? "digest", ...(boards ? { boards } : {}) };
     this.store.state.watches = [...(this.store.state.watches ?? []).filter((item) => item.name !== cleaned.name), cleaned];
     await this.store.save(this.now());
     return { watches: this.store.state.watches, note: "Watches run here on every fetch, without a model call. The network never sees them." };
@@ -565,6 +552,43 @@ export class Bridge {
     this.store.state.watches = (this.store.state.watches ?? []).filter((item) => item.name !== name);
     await this.store.save(this.now());
     return { watches: this.store.state.watches };
+  }
+
+  /**
+   * Changes only local notification routing. None and desktop are immediate local preferences;
+   * introducing or changing a shell command is a separate human-approved capability.
+   */
+  async configureNotifications(input: { urgent?: NotificationChannel; digest?: NotificationChannel }): Promise<Row> {
+    await this.refresh();
+    this.requireMember();
+    if (!input.urgent && !input.digest) throw new ToolError("Choose an urgent or digest notification route to update.");
+    const current = this.notificationPreferences();
+    const preferences: NotificationPreferences = {
+      urgent: input.urgent ? this.cleanNotificationChannel(input.urgent) : current.urgent,
+      digest: input.digest ? this.cleanNotificationChannel(input.digest) : current.digest,
+    };
+    const commandChanges = (Object.keys(preferences) as Array<keyof NotificationPreferences>)
+      .filter((route) => preferences[route].kind === "command" && JSON.stringify(preferences[route]) !== JSON.stringify(current[route]));
+    if (commandChanges.length) {
+      const decision = await this.approver.request({
+        action: "configure_notifications",
+        title: "Allow a Dossy notification command",
+        recipient: "This computer only. Dossy does not receive the command or notification settings.",
+        disclosure: Object.fromEntries(commandChanges.map((route) => [route, preferences[route]])),
+        permits: commandChanges.map((route) => `When ${route} Dossy matches are ready, run this exact local command: ${preferences[route].command}`),
+        notes: ["The command gets a count, matched watch names, route, and a fixed message through environment variables. Request text is never put on its command line."],
+      });
+      if (!decision.approved) return { updated: false, declined: true, preferences: current };
+    }
+    this.store.state.notifications = preferences;
+    await this.store.save(this.now());
+    return { updated: true, preferences, note: "Notification preferences stay on this machine. Desktop and none do not require an approval; command routes do." };
+  }
+
+  private cleanNotificationChannel(input: NotificationChannel): NotificationChannel {
+    if (input.kind === "none" || input.kind === "desktop") return { kind: input.kind };
+    if (input.kind === "command" && input.command?.trim()) return { kind: "command", command: input.command.trim() };
+    throw new ToolError("A command notifier needs the exact local command to run.");
   }
 
   vocabulary(className?: string): Row {
@@ -599,7 +623,7 @@ export class Bridge {
     this.store.state.digest = [];
     await this.store.save(this.now());
     return {
-      new_requests: [...queued, ...found.requests],
+      new_requests: [...queued.map(({ notified_at: _announced, ...item }) => item), ...found.requests],
       coverage_gaps: found.gaps,
       guidance: "Decide privately with your human. Declining needs no action: silence sends nothing.",
     };
@@ -628,7 +652,7 @@ export class Bridge {
     return { results: hits, searched: pool.length, note: "Searched locally. The network saw only feed reads." };
   }
 
-  /** For a scheduler: finds new requests, holds them for the next check_requests, and notifies on a match. */
+  /** For a scheduler: finds new requests, holds them for the next check_requests, and notifies urgent watches. */
   async syncToDigest(): Promise<number> {
     return this.withFeed(async () => {
       await this.flushOutbox();
@@ -648,11 +672,60 @@ export class Bridge {
     const found = await this.discoverNew();
     this.store.state.digest = [...(this.store.state.digest ?? []), ...found.requests];
     await this.store.save(this.now());
-    if (found.requests.length) {
-      const watches = [...new Set(found.requests.flatMap((item) => (item.matched_watches as string[] | undefined) ?? []))];
-      await (this.options.notify ?? notifyHuman)(this.store.state.grant, { count: found.requests.length, watches });
-    }
+    const urgent = found.requests.filter((item) => this.notificationRoute(item) === "urgent");
+    if (urgent.length) await this.announce("urgent", urgent);
     return found.requests.length;
+  }
+
+  /**
+   * Emits one local digest for held non-urgent matches that no notification has announced yet, so
+   * a scheduled digest never repeats itself. It neither reads nor sends network data.
+   */
+  async notifyDigest(): Promise<Row> {
+    return this.withFeed(async () => {
+      this.requireMember();
+      const held = (this.store.state.digest ?? []).filter((item) => this.notificationRoute(item) === "digest");
+      const fresh = held.filter((item) => !item.notified_at);
+      const notified = fresh.length ? await this.announce("digest", fresh) : 0;
+      return { held: held.length, notified, watches: this.summary("digest", fresh).watches, route: "digest", notification: this.notificationPreferences().digest.kind };
+    });
+  }
+
+  /**
+   * Until the human sets notification preferences, a bridge upgraded from before priorities keeps
+   * notifying on every sync, as its grant's notifier did: only a match on watches explicitly set
+   * to digest waits. Watches saved now always carry a priority.
+   */
+  private notificationRoute(item: Row): NotificationRoute {
+    const names = new Set((item.matched_watches as string[] | undefined) ?? []);
+    const matched = (this.store.state.watches ?? []).filter((watch) => names.has(watch.name));
+    if (!this.store.state.notifications) return matched.length && matched.every((watch) => watch.priority === "digest") ? "digest" : "urgent";
+    return matched.some((watch) => watch.priority === "urgent") ? "urgent" : "digest";
+  }
+
+  private summary(route: NotificationRoute, items: Row[]): MatchSummary {
+    return {
+      count: items.length,
+      watches: [...new Set(items.flatMap((item) => (item.matched_watches as string[] | undefined) ?? []))],
+      route,
+    };
+  }
+
+  private notificationPreferences(): NotificationPreferences {
+    const legacy = this.store.state.grant?.notify ?? { kind: "none" as const };
+    return this.store.state.notifications ?? { urgent: legacy, digest: legacy };
+  }
+
+  /** Notifies once for these held items, and marks them announced unless the route is off. Returns how many reached a channel. */
+  private async announce(route: NotificationRoute, items: Row[]): Promise<number> {
+    const channel = this.notificationPreferences()[route];
+    await (this.options.notify ?? notifyHuman)(channel, this.summary(route, items));
+    if (channel.kind === "none") return 0;
+    const ids = new Set(items.map((item) => String(item.request_id)));
+    const at = this.now().toISOString();
+    this.store.state.digest = (this.store.state.digest ?? []).map((item) => (ids.has(String(item.request_id)) ? { ...item, notified_at: at } : item));
+    await this.store.save(this.now());
+    return items.length;
   }
 
   /**
@@ -740,7 +813,15 @@ export class Bridge {
 
   async listInvites(): Promise<Row> {
     this.requireMember();
-    return this.client.listInvites();
+    const listed = await this.client.listInvites();
+    const notes = this.store.state.invite_notes ?? {};
+    return {
+      ...listed,
+      invites: ((listed.invites ?? []) as Row[]).map((invite) => {
+        const local = notes[String(invite.invite_id)];
+        return local ? { ...invite, local_note: local.note, local_status: local.status, local_updated_at: local.updated_at } : invite;
+      }),
+    };
   }
 
   async moderationQueue(): Promise<Row> {
@@ -759,15 +840,40 @@ export class Bridge {
     const inbox = await this.client.inbox();
     const received = [];
     for (const offer of inbox.offers_received as Row[]) received.push(await this.openReceivedOffer(offer));
-    const mine = [];
+    const mine: Row[] = [];
     for (const requestId of Object.keys(this.store.state.keys.reply)) {
       try {
         const request = await this.client.getRequest(requestId);
         const screening = this.screeningFor(requestId);
-        mine.push({ request_id: requestId, state: request.state, expires_at: request.expires_at, class: (request.document as Row).class, board_id: (request.document as Row).board_id, ...(screening ? { screening } : {}) });
+        const saved = this.store.state.request_drafts?.[requestId];
+        mine.push({
+          request_id: requestId,
+          state: request.state,
+          expires_at: request.expires_at,
+          class: (request.document as Row).class,
+          board_id: (request.document as Row).board_id,
+          ...(screening ? { screening } : {}),
+          ...(saved ? { renewal: this.renewalStatus(requestId, String(request.state), String(request.expires_at), saved.expires_at) } : {}),
+        });
       } catch (error) {
         if (!(error instanceof ProtocolClientError && error.status === 404)) throw error;
+        const saved = this.store.state.request_drafts?.[requestId];
+        if (saved) {
+          mine.push({
+            request_id: requestId,
+            state: "unavailable_or_expired",
+            expires_at: saved.expires_at,
+            renewal: this.renewalStatus(requestId, "unavailable_or_expired", saved.expires_at, saved.expires_at),
+          });
+        }
       }
+    }
+    // A hidden request reads as expired once its time passes, so a request seen ending early
+    // (withdrawn, hidden, or removed) loses its draft now and is never offered for renewal.
+    const ended = mine.filter((request) => (request.renewal as Row | undefined)?.stage === "ended").map((request) => String(request.request_id));
+    if (ended.length) {
+      for (const requestId of ended) delete this.store.state.request_drafts?.[requestId];
+      await this.store.save(this.now());
     }
     return {
       my_requests: mine,
@@ -783,6 +889,51 @@ export class Bridge {
         remaining: connection.remaining,
       })),
     };
+  }
+
+  /** Local renewal and connection follow-ups for an agent host that chooses when to ask. */
+  async reviewFollowUps(): Promise<Row> {
+    const activity = await this.activity();
+    const requests = (activity.my_requests as Row[]).flatMap((request) => {
+      const draft = this.store.state.request_drafts?.[String(request.request_id)];
+      if (!draft) return [];
+      const renewal = request.renewal as Row | undefined;
+      if (!renewal?.suggested_prompt) return [];
+      return [{
+        request_id: request.request_id,
+        state: request.state,
+        expires_at: request.expires_at,
+        draft: draft.input,
+        suggested_prompt: renewal.suggested_prompt,
+      }];
+    });
+    // Ratings approved on this machine. One made from another agent still shows until the human says so.
+    const rated = new Set(this.store.state.receipts.filter((receipt) => receipt.action === "rate_connection" && receipt.approved).map((receipt) => receipt.object.id));
+    const connections = (activity.connections as Row[])
+      .filter((connection) => (connection.state === "established" || connection.state === "closed") && !rated.has(String(connection.connection_id)))
+      .map((connection) => ({
+        connection_id: connection.connection_id,
+        state: connection.state,
+        suggested_prompt: "Ask whether the human met or spoke with the other side. If there is a basis, offer the matching rating; otherwise leave it unrated. Never default to useful.",
+      }));
+    return { request_renewals: requests, connection_follow_ups: connections, note: "These prompts and drafts stay local. They never create a repost, rating, message, or notification on their own." };
+  }
+
+  /**
+   * Renewal is offered only for a request that ran its course. One the human withdrew, or a
+   * moderator hid or removed, is never offered for reposting, nor is one gone before its expiry.
+   */
+  private renewalStatus(requestId: string, state: string, expiresAt: string, savedExpiresAt: string): Row {
+    const remaining = Date.parse(expiresAt) - this.now().getTime();
+    const ranOut = state === "expired" || ((state === "open" || state === "unavailable_or_expired") && remaining <= 0);
+    const stage = ranOut ? "ready"
+      : state !== "open" ? "ended"
+      : remaining <= DAY ? "soon"
+      : "monitor";
+    const suggested = stage === "ready"
+      ? "Ask whether to repost this request as-is, improve it, or let it end. Do not repost without approval."
+      : "Ask whether to renew or refine this request before it expires. Do not repost without approval.";
+    return { request_id: requestId, source_expires_at: savedExpiresAt, stage, ...(stage === "ready" || stage === "soon" ? { suggested_prompt: suggested } : {}) };
   }
 
   async readMessages(connectionId: string): Promise<Row> {
@@ -818,17 +969,22 @@ export class Bridge {
    * Changes the standing grant. The human always approves the exact grant, including any command
    * the notifier will run, so a prompt in a request cannot widen the agent's authority.
    */
-  async updateGrant(input: { standing_actions?: string[]; notify?: StandingGrant["notify"]; expires_in_days?: number }): Promise<Row> {
+  /**
+   * Changes the housekeeping the human allows without asking. Notifications are set with
+   * configureNotifications instead; a notifier approved with an earlier grant carries over
+   * unchanged, so an upgraded bridge keeps alerting until the human sets preferences.
+   */
+  async updateGrant(input: { standing_actions?: string[]; expires_in_days?: number; notify?: unknown }): Promise<Row> {
     await this.refresh();
     this.requireMember();
+    if (input.notify !== undefined) throw new ToolError("Notifications are no longer part of the standing grant. Use set_notification_preferences.");
     const actions = [...new Set(input.standing_actions ?? RECOMMENDED_ACTIONS)];
     const unknown = actions.filter((action) => !GRANTABLE_ACTIONS.includes(action));
     if (unknown.length) throw new ToolError(`A standing grant cannot cover ${unknown.join(", ")}. Publishing, offers, connections, messages, and invites always need your human's approval.`);
-    const notify = input.notify ?? { kind: "none" as const };
-    if (notify.kind === "command" && !notify.command?.trim()) throw new ToolError("A command notifier needs the command to run.");
+    const notify = this.store.state.grant?.notify ?? { kind: "none" as const };
     const grant: StandingGrant = {
       standing_actions: actions.sort(),
-      notify: notify.kind === "command" ? { kind: "command", command: String(notify.command).trim() } : { kind: notify.kind },
+      notify,
       ...(input.expires_in_days ? { expires_at: this.at(input.expires_in_days * DAY) } : {}),
       approved_at: this.now().toISOString(),
     };
@@ -839,7 +995,9 @@ export class Bridge {
       disclosure: grant,
       permits: [
         actions.length ? `Your agent may do these without asking each time: ${actions.join(", ")}` : "Your agent asks you before every action",
-        grant.notify.kind === "command" ? `When new requests match, this command runs on this machine: ${grant.notify.command}` : grant.notify.kind === "desktop" ? "When new requests match, a desktop notification appears" : "No notifications",
+        ...(notify.kind !== "none" && !this.store.state.notifications
+          ? [`Keeps the match notifications you approved earlier (${notify.kind === "command" ? `this command: ${notify.command}` : "desktop"}) until you set notification preferences`]
+          : []),
       ],
       notes: ["Publishing, offers, connections, messages, and invites always ask you, whatever this grant says."],
     });
@@ -940,8 +1098,14 @@ export class Bridge {
         ...(screening ? [`Your screening rules stay on this machine and are never sent: ${screening}`] : []),
       ],
     };
+    const keepUntil = new Date(Date.parse(expiresAt) + 8 * DAY).toISOString();
     const result = await this.guard(() => this.send(approval, { type: "board", id: String(board.board_id) }, authorizationRef, "postRequest", [document, authorizationRef], expiresAt, randomId(),
-      { rename_reply_from: replyId, retarget_ref: authorizationRef, ...(screening ? { screening } : {}) }), () => delete this.store.state.keys.reply[replyId]);
+      {
+        rename_reply_from: replyId,
+        retarget_ref: authorizationRef,
+        ...(screening ? { screening } : {}),
+        request_draft: { input: structuredClone({ ...input, board_id: String(board.board_id) }), expires_at: expiresAt, keep_until: keepUntil },
+      }), () => delete this.store.state.keys.reply[replyId]);
     await this.store.save(this.now());
     return result;
   }
@@ -1210,44 +1374,89 @@ export class Bridge {
     return result;
   }
 
-  async rateConnection(connectionId: string, value: "useful" | "not_useful" | "no_show" | "spam" | "abusive"): Promise<Row> {
+  async rateConnection(
+    connectionId: string,
+    value: "useful" | "not_useful" | "no_show" | "spam" | "abusive",
+    basis?: "human_said" | "observed_meeting",
+  ): Promise<Row> {
     const connection = await this.connection(connectionId);
     const approval: ApprovalRequest = {
       action: "rate_connection",
       title: `Rate the other side of connection ${connectionId} as ${value.replace("_", " ")}`,
       recipient: "The network, as part of their standing",
-      disclosure: { connection_id: connectionId, rating: value },
+      disclosure: { connection_id: connectionId, rating: value, ...(basis ? { basis } : {}) },
       permits: [
         "Counts toward the other side's standing, and a share toward whoever invited them. You may change it until a week after the connection ends",
         `You were the ${String(connection.role)} on this connection`,
       ],
+      notes: [
+        basis === "human_said" ? "The human supplied this rating." : basis === "observed_meeting" ? "This agent observed the meeting or outcome that supports this rating." : "No evidence basis was supplied, so this rating must be approved now even if a standing grant exists.",
+        "Never infer a useful rating from a handoff, silence, or the mere existence of a connection.",
+      ],
     };
-    const result = await this.send(approval, { type: "connection", id: connectionId }, randomId(), "rateConnection", [connectionId, value, randomId()], this.at(15 * 60_000));
+    const result = await this.send(
+      approval,
+      { type: "connection", id: connectionId },
+      randomId(),
+      "rateConnection",
+      [connectionId, value, randomId()],
+      this.at(15 * 60_000),
+      undefined,
+      undefined,
+      false,
+      basis === "human_said" || basis === "observed_meeting",
+    );
     await this.store.save(this.now());
     return result;
   }
 
   /** Creates a network invite. Always asks the human, and tells them what it puts at stake. */
-  async createInvite(label?: string): Promise<Row> {
+  async createInvite(label?: string, recipientNote?: string): Promise<Row> {
     this.requireMember();
+    const note = recipientNote?.trim();
+    if (note && note.length > 280) throw new ToolError("An invite note must be at most 280 characters.");
     const budget = await this.client.listInvites();
     const approval: ApprovalRequest = {
       action: "create_invite",
       title: "Create a single-use invite to Dossy",
       recipient: "Whoever you give the link to. You send it yourself; Dossy never learns who receives it",
-      disclosure: { kind: "network", ...(label ? { label } : {}) },
+      disclosure: { kind: "network", ...(label ? { label } : {}), ...(note ? { recipient_note_local_only: note } : {}) },
       permits: [
         `Uses 1 of your ${Number(budget.invites_remaining)} invites. An unused invite comes back after 7 days`,
         String(budget.stake),
       ],
-      notes: ["The person you invite gives the link to their own agent, which walks them through joining."],
+      notes: ["The person you invite gives the link to their own agent, which walks them through joining.", ...(note ? ["The recipient note stays on this machine and is never sent to Dossy or put in the invite link."] : [])],
     };
-    const result = await this.send(approval, { type: "invite", id: "new" }, randomId(), "createInvite", [{ kind: "network", ...(label ? { label } : {}) }, randomId()], this.at(15 * 60_000));
+    const result = await this.send(
+      approval,
+      { type: "invite", id: "new" },
+      randomId(),
+      "createInvite",
+      [{ kind: "network", ...(label ? { label } : {}) }, randomId()],
+      this.at(15 * 60_000),
+      undefined,
+      note ? { invite_note: note } : undefined,
+    );
     if (result.sent) {
       result.message_for_your_human = `Send this to the person you are inviting: "Give this to your AI agent: read https://dossy.dev/agent.md and join Dossy with this invite: ${String(result.invite_url)}. It will ask for your email and a code."`;
     }
     await this.store.save(this.now());
     return result;
+  }
+
+  /** Records that the human sent an invite, so their local agent can check its status and offer a nudge later. */
+  async recordInviteSent(inviteId: string, note?: string): Promise<Row> {
+    await this.refresh();
+    this.requireMember();
+    const existing = this.store.state.invite_notes?.[inviteId];
+    const cleaned = note?.trim() || existing?.note;
+    if (cleaned && cleaned.length > 280) throw new ToolError("An invite note must be at most 280 characters.");
+    this.store.state.invite_notes = {
+      ...this.store.state.invite_notes,
+      [inviteId]: { note: cleaned ?? "", status: "sent", updated_at: this.now().toISOString() },
+    };
+    await this.store.save(this.now());
+    return { recorded: true, invite_id: inviteId, note: cleaned, status: "sent", next: "Use list_invites later to check whether it was accepted; ask before drafting any nudge." };
   }
 
   async revokeInvite(inviteId: string): Promise<Row> {
@@ -1380,9 +1589,10 @@ export class Bridge {
     operationId = randomId(),
     effects?: PendingSend["effects"],
     covered = false,
+    allowStanding = true,
   ): Promise<Row> {
     await this.refresh();
-    const standing = covered || this.grantCovers(approval.action);
+    const standing = allowStanding && (covered || this.grantCovers(approval.action));
     const decision = standing ? { approved: true, channel: "standing_grant" } : await this.approver.request(approval);
     this.store.record({
       at: this.now().toISOString(),
@@ -1444,6 +1654,15 @@ export class Bridge {
     }
     if (item.effects?.screening && created?.type === "request") {
       this.store.state.screening = { ...this.store.state.screening, [created.id]: { rules: item.effects.screening, expires_at: String((item.args[0] as Row).expires_at) } };
+    }
+    if (item.effects?.request_draft && created?.type === "request") {
+      this.store.state.request_drafts = { ...this.store.state.request_drafts, [created.id]: item.effects.request_draft };
+    }
+    if (item.effects?.invite_note && item.method === "createInvite" && result.invite_id) {
+      this.store.state.invite_notes = {
+        ...this.store.state.invite_notes,
+        [String(result.invite_id)]: { note: item.effects.invite_note, status: "created", updated_at: this.now().toISOString() },
+      };
     }
     const ref = item.effects?.retarget_ref;
     if (ref && created) {

@@ -5,6 +5,8 @@
  */
 export type Watch = {
   name: string;
+  /** Urgent watches notify as soon as a sync finds a match; all other watches wait for a digest. */
+  priority?: "urgent" | "digest";
   /** Only these boards, or any board when omitted. */
   boards?: string[];
   classes?: string[];
