@@ -25,6 +25,8 @@ The hosted launch also needs configured and verified database and email provider
 
 ## Current scope
 
+The open [A2A gateway profile](/a2a) and fixtures describe a disabled, optional compatibility adapter. They are not evidence that the hosted A2A endpoint is enabled, that a DCP real-host pilot has succeeded, or that Dossy retains A2A tasks or histories.
+
 | Available in the draft | Outside the current implementation |
 | --- | --- |
 | One request on one board; open and private boards | Cross-network federation or automatic republication |

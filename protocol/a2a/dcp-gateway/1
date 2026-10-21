@@ -1,0 +1,10 @@
+{
+  "uri": "https://dossy.dev/a2a/dcp-gateway/1",
+  "version": "1",
+  "title": "Dossy A2A DCP gateway extension",
+  "profile": "https://dossy.dev/a2a/dcp-gateway-v1.md",
+  "input_schema": "https://dossy.dev/a2a/schemas/dcp-gateway-input.json",
+  "output_schema": "https://dossy.dev/a2a/schemas/dcp-gateway-output.json",
+  "required_headers": ["A2A-Version: 1.0", "A2A-Extensions: https://dossy.dev/a2a/dcp-gateway/1", "Authorization: Bearer <DCP agent token>"],
+  "availability": "The profile is public; hosted gateway activation remains separately gated."
+}

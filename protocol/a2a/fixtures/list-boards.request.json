@@ -1,0 +1,14 @@
+{
+  "headers": {
+    "A2A-Version": "1.0",
+    "A2A-Extensions": "https://dossy.dev/a2a/dcp-gateway/1",
+    "Authorization": "Bearer <existing-dcp-agent-token>"
+  },
+  "body": {
+    "message": {
+      "messageId": "correlation-only-example",
+      "role": "ROLE_USER",
+      "parts": [{ "kind": "data", "mediaType": "application/json", "data": { "operation": "list_boards", "input": {} } }]
+    }
+  }
+}

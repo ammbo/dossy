@@ -12,12 +12,14 @@
     "./bounds.json": "./bounds.json",
     "./vocabularies/*": "./vocabularies/*",
     "./schemas/*": "./schemas/*",
+    "./a2a/*": "./a2a/*",
     "./openapi.yaml": "./openapi.yaml"
   },
   "license": "Apache-2.0",
   "files": [
     "dist",
     "schemas",
+    "a2a",
     "vocabularies",
     "bounds.json",
     "openapi.yaml",

@@ -18,7 +18,7 @@ for (const [dir, body, kind] of [[docs, docsHome, "docs"]]) {
   await writeFile(join(dir, "style.css"), style + pickerCss());
   await writeFile(join(dir, "favicon.svg"), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#142b26"/><text x="18" y="47" fill="#d5f0bb" font-family="system-ui" font-size="48" font-weight="700">d</text></svg>');
   await writeFile(join(dir, "404.html"), layout("Page not found · Dossy", "Page not found", '<section class="hero"><h1>That page is missing.</h1><p><a href="/">Browse the documentation →</a></p></section>', kind, { path: "/404", noindex: true }));
-  await writeFile(join(dir, "_headers"), "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Content-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\n/releases/*\n  Cache-Control: public, max-age=300\n/.well-known/*\n  Cache-Control: no-cache\n");
+  await writeFile(join(dir, "_headers"), "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Content-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\n/releases/*\n  Cache-Control: public, max-age=300\n/.well-known/*\n  Cache-Control: no-cache\n/a2a/dcp-gateway/1\n  Content-Type: application/json\n");
 }
 const tools = JSON.parse(execFileSync(process.execPath, [join(root, "packages/mcp-bridge/dist/dossy-bridge.mjs"), "tools"], { encoding: "utf8" })).tools;
 for (const page of docPages) {
@@ -29,7 +29,7 @@ for (const page of docPages) {
     const target = relative(root, resolve(root, dirname(source), path));
     if (target.startsWith("..")) throw new Error(`Link escapes public source: ${href}`);
     const linkedPage = docPages.find((page) => page.source === target);
-    const raw = /^(?:protocol\/(?:schemas|vocabularies)\/|protocol\/(?:bounds.json|openapi.yaml|SPEC.md|CHANGELOG.md)$)/.test(target);
+    const raw = /^(?:protocol\/(?:schemas|vocabularies|a2a)\/|protocol\/(?:bounds.json|openapi.yaml|SPEC.md|CHANGELOG.md)$)/.test(target);
     const url = linkedPage ? `/${linkedPage.slug}` : raw ? `/${target.slice("protocol/".length)}` : `https://github.com/ammbo/dossy/blob/main/${target}`;
     return before + url + (fragment ? "#" + fragment : "") + after;
   });
@@ -51,7 +51,7 @@ await cp(join(root, "docs/examples"), join(docs, "sample-requests"), { recursive
 await writeFile(join(docs, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${["", ...docPages.map((p) => p.slug)].map((slug) => `<url><loc>https://dossy.dev/${slug}</loc></url>`).join("")}</urlset>`);
 await writeFile(join(docs, "robots.txt"), "User-agent: *\nAllow: /\nSitemap: https://dossy.dev/sitemap.xml\n");
 for (const file of ["agent.md", "install.mjs", "agent-picker.js"]) await copyFile(join(root, "apps/protocol-site", file), join(docs, file));
-for (const file of ["schemas", "vocabularies", "bounds.json", "openapi.yaml", "SPEC.md", "CHANGELOG.md"]) await cp(join(root, "protocol", file), join(docs, file), { recursive: true });
+for (const file of ["schemas", "vocabularies", "a2a", "bounds.json", "openapi.yaml", "SPEC.md", "CHANGELOG.md"]) await cp(join(root, "protocol", file), join(docs, file), { recursive: true });
 const releases = join(docs, "releases");
 await mkdir(releases, { recursive: true });
 for (const file of ["dossy-bridge.mjs", "THIRD_PARTY_NOTICES.md"]) await copyFile(join(root, "packages/mcp-bridge/dist", file), join(releases, file));

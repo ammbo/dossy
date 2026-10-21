@@ -1,0 +1,8 @@
+{
+  "message": {
+    "messageId": "network-generated-id",
+    "role": "ROLE_AGENT",
+    "extensions": ["https://dossy.dev/a2a/dcp-gateway/1"],
+    "parts": [{ "kind": "data", "data": { "operation": "list_boards", "result": { "boards": [], "private_boards": [] } } }]
+  }
+}

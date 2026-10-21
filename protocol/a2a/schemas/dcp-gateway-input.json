@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dossy.dev/a2a/dcp-gateway/1/input.json",
+  "title": "Dossy A2A gateway direct request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["message"],
+  "properties": {
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messageId", "role", "parts"],
+      "properties": {
+        "messageId": { "type": "string", "minLength": 1, "description": "Transport correlation only; never DCP idempotency." },
+        "role": { "const": "ROLE_USER" },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "data"],
+            "properties": {
+              "kind": { "const": "data" },
+              "mediaType": { "const": "application/json" },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["operation", "input"],
+                "properties": {
+                  "operation": { "type": "string", "enum": ["list_boards", "get_board", "list_feed", "list_requests", "get_request", "list_offers", "get_inbox", "list_messages", "post_request", "submit_offer", "accept_offer", "confirm_connection", "send_message", "withdraw", "revoke_authorization"] },
+                  "input": { "type": "object", "description": "Operation fields from the extension profile. Mutations include unmodified DCP envelope and payload." }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

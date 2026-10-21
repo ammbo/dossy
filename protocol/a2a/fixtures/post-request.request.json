@@ -1,0 +1,15 @@
+{
+  "headers": {
+    "A2A-Version": "1.0",
+    "A2A-Extensions": "https://dossy.dev/a2a/dcp-gateway/1",
+    "Authorization": "Bearer <existing-dcp-agent-token>"
+  },
+  "body": {
+    "message": {
+      "messageId": "transport-correlation-only",
+      "role": "ROLE_USER",
+      "parts": [{ "kind": "data", "data": { "operation": "post_request", "input": { "envelope": "<DCP-ES256-envelope-with-operation_id>", "payload": { "<exact-dcp-request-document>": "placeholder" } } } }]
+    }
+  },
+  "note": "The gateway does not sign, alter, decrypt, or retain envelope/payload. Retry the same DCP operation_id, not the A2A messageId."
+}
