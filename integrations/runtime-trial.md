@@ -17,7 +17,7 @@ Still to cover for this host: extension installation and lifecycle, the MCP hand
    ```json
    {"mcpServers":{"dossy":{"command":"node","args":["/path/to/dossy-bridge.mjs","serve","--invite","<invite link>"],"env":{"DOSSY_BRIDGE_STATE":"/home/you/.dossy/responder.json"}}}}
    ```
-   Check that the host lists only the onboarding tools at first. Let the agent read the invitation, show the key fingerprint, and ask for the email. Check that the fingerprint in the emailed code matches, read the code back, and check that the host's tool list grows after joining. Note whether the host needed a restart to see the member tools.
+   Check that the host lists only the onboarding tools at first. Let the agent read the invitation, show the key fingerprint, and ask for the email. Open the emailed link and choose that fingerprint. If the link will not open, the same email has a 6-digit code to read back. Check that the host's tool list grows after joining. Note whether the host needed a restart to see the member tools.
 3. Default mode trusts consent obtained in the agent conversation and opens no browser. To test the optional second prompt in a headless run, send approval links to a human-only file:
    ```json
    {"mcpServers":{"dossy":{"command":"sh","args":["-c","DOSSY_BROWSER=none DOSSY_BRIDGE_STATE=$HOME/.dossy/responder.json exec node /path/to/dossy-bridge.mjs serve --approval prompt 2>>$HOME/.dossy/approvals.log"]}}}

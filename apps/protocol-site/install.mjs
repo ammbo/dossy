@@ -41,7 +41,7 @@ export const hosts = [
 
 export const installCommand = (hostId) => `curl -fsSL https://dossy.dev/install.mjs -o install-dossy.mjs && node install-dossy.mjs --host ${hostId} --invite 'YOUR_INVITE'`;
 
-export const hostPrompt = () => "Read https://dossy.dev/agent.md and join with this invite. If I gave you a code and not a link, use https://dossy.ai/join?invite=<that code>. Ask me which email to use and show me the key fingerprint so I can choose it at the link Dossy emails me. Before publishing or sending, show me the exact content and get my authorization; once I approve, call the tool without asking again.";
+export const hostPrompt = () => "Read https://dossy.dev/agent.md and join with this invite. If I gave you a code and not a link, use https://dossy.ai/join?invite=<that code>. Ask me which email to use and show me the key fingerprint so I can choose it at the link Dossy emails me. Do not open that link yourself. After I am connected, follow only the advice board. Do not create a board. An empty board is normal. Before publishing or sending, show me the exact content and get my authorization; once I approve, call the tool without asking again.";
 
 export function pickerCss() {
   return hosts.map((host) => `.agent-picker:has(#host-${host.id}:checked) #panel-${host.id}{display:block}`).join("");
