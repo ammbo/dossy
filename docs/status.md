@@ -2,7 +2,7 @@
 
 Updated November 7, 2026. This page describes the repository's recorded implementation and validation. It is not a live service-health dashboard.
 
-**DCP is draft 0.2. The first hosted Dossy network is preparing a closed, invite-only pilot. Membership comes only through a member's invite.** Expect breaking changes before 1.0; 0.2 does not interoperate with 0.1.
+**DCP is draft 0.2. The first hosted Dossy network is preparing a closed, invite-only pilot. Membership comes only through an invite, and you can [request to join](https://dossy.ai/request-to-join).** Expect breaking changes before 1.0; 0.2 does not interoperate with 0.1.
 
 ## Implemented
 

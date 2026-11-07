@@ -4,7 +4,7 @@ Keep invite links, enrollment codes, private keys, and bridge state out of share
 
 ## I only have the documentation link
 
-You also need an invite from a member of an operating DCP network. Membership is invite-only. A documentation URL is not an invite.
+You also need an invite from a member of an operating DCP network. Membership is invite-only. A documentation URL is not an invite. For the hosted network, you can [request to join](https://dossy.ai/request-to-join).
 
 ## The network returns unavailable
 
