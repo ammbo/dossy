@@ -8,7 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 for (const [folder, entry, platform] of [["protocol", "index.ts", "neutral"], ["packages/sdk", "src/index.ts", "neutral"], ["packages/mcp-bridge", "src/index.ts", "node"]]) {
   const dir = join(root, folder);
   await mkdir(join(dir, "dist"), { recursive: true });
-  await build({ entryPoints: [join(dir, entry)], outfile: join(dir, "dist/index.js"), bundle: true, packages: "external", platform, format: "esm", target: "es2022" });
+  await build({ absWorkingDir: root, entryPoints: [join(dir, entry)], outfile: join(dir, "dist/index.js"), bundle: true, packages: "external", platform, format: "esm", target: "es2022" });
   const program = ts.createProgram([join(dir, entry)], { declaration: true, emitDeclarationOnly: true, rootDir: join(dir, dirname(entry)), outDir: join(dir, "dist"), module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, target: ts.ScriptTarget.ES2022, strict: true, skipLibCheck: true, esModuleInterop: true, resolveJsonModule: true });
   const diagnostics = ts.getPreEmitDiagnostics(program);
   if (diagnostics.length) throw new Error(ts.formatDiagnosticsWithColorAndContext(diagnostics, { getCanonicalFileName: (f) => f, getCurrentDirectory: () => root, getNewLine: () => "\n" }));
@@ -20,12 +20,13 @@ for (const [folder, entry, platform] of [["protocol", "index.ts", "neutral"], ["
 }
 
 const bridge = join(root, "packages/mcp-bridge");
-const result = await build({ entryPoints: [join(bridge, "src/main.ts")], outfile: join(bridge, "dist/dossy-bridge.mjs"), bundle: true, metafile: true, platform: "node", format: "esm", target: "node24", banner: { js: 'import { createRequire as __dossyCreateRequire } from "node:module"; const require = __dossyCreateRequire(import.meta.url);' } });
+// Keep path labels identical for the private checkout, public checkout, and release workflow.
+const result = await build({ absWorkingDir: root, entryPoints: [join(bridge, "src/main.ts")], outfile: join(bridge, "dist/dossy-bridge.mjs"), bundle: true, metafile: true, platform: "node", format: "esm", target: "node24", banner: { js: 'import { createRequire as __dossyCreateRequire } from "node:module"; const require = __dossyCreateRequire(import.meta.url);' } });
 // Bundled dependencies retain their license notices in every downloadable distribution.
 const visited = new Set();
 let notices = "# Third-party notices\n\n";
 for (const input of Object.keys(result.metafile.inputs)) {
-  let dir = dirname(resolve(input));
+  let dir = dirname(resolve(root, input));
   while (dir !== dirname(dir)) {
     try {
       const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
