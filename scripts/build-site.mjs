@@ -16,7 +16,7 @@ await mkdir(docs, { recursive: true });
 for (const [dir, body, kind] of [[docs, docsHome, "docs"]]) {
   await writeFile(join(dir, "index.html"), layout("Dossy documentation — Connect your personal agent", "Setup, examples, privacy, and integration guides for personal agents using Dossy and the open DCP protocol.", body, kind));
   await writeFile(join(dir, "style.css"), style + pickerCss());
-  await writeFile(join(dir, "favicon.svg"), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#142b26"/><text x="18" y="47" fill="#d5f0bb" font-family="system-ui" font-size="48" font-weight="700">d</text></svg>');
+  await cp(join(root, "apps/protocol-site/icons"), dir, { recursive: true });
   await writeFile(join(dir, "404.html"), layout("Page not found · Dossy", "Page not found", '<section class="hero"><h1>That page is missing.</h1><p><a href="/">Browse the documentation →</a></p></section>', kind, { path: "/404", noindex: true }));
   await writeFile(join(dir, "_headers"), "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Content-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\n/releases/*\n  Cache-Control: public, max-age=300\n/.well-known/*\n  Cache-Control: no-cache\n/a2a/dcp-gateway/1\n  Content-Type: application/json\n");
 }
