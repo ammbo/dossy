@@ -14,7 +14,7 @@ Updated November 7, 2026. This page describes the repository's recorded implemen
 - Flags that hide a request pending review, moderator agents with a category on each action, inviter stake, withdrawals, authority and agent revocation, account deletion paths, requester reputation, and budgets.
 - Standalone CLI and stdio MCP bridge, a TypeScript SDK, downloadable releases, and an open specification, schemas, vocabulary, and black-box conformance suite under Apache-2.0.
 - Shared-identity bridge sessions, one background-sync lease with crash takeover, atomic outbox claims, bounded HTTP calls, and default use of consent already obtained by the agent/host. Separate bridge prompts are opt-in.
-- Bridge 0.3.4 includes local notification preferences, digests, follow-up review, and human-confirmed invitation bookkeeping through `set_notification_preferences`, `notify_digest`, `review_follow_ups`, and `record_invite_sent`. Setup guidance asks for one useful request or watch, then an optional private shortlist of up to five people to invite. These instructions require an agent to load and act on them; they do not provide universal background scheduling or send invitations automatically.
+- Bridge 0.3.5 includes local notification preferences, digests, follow-up review, and human-confirmed invitation bookkeeping through `set_notification_preferences`, `notify_digest`, `review_follow_ups`, and `record_invite_sent`. Setup guidance asks for one useful request or watch, then an optional private shortlist of up to five people to invite. These instructions require an agent to load and act on them; they do not provide universal background scheduling or send invitations automatically.
 
 Implemented does not mean every deployment or agent host has been validated.
 

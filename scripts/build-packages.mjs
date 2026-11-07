@@ -1,6 +1,6 @@
 import { build } from "esbuild";
 import ts from "typescript";
-import { copyFile, cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,8 +33,17 @@ for (const input of Object.keys(result.metafile.inputs)) {
       if (pkg.name && !pkg.name.startsWith("@dossy/") && !visited.has(pkg.name)) {
         visited.add(pkg.name);
         notices += `## ${pkg.name} ${pkg.version ?? ""}\n\n`;
-        for (const name of ["LICENSE", "LICENSE.md", "LICENSE.txt", "license", "license.md", "LICENSE-MIT", "NOTICE"]) {
-          try { notices += `${await readFile(join(dir, name), "utf8")}\n\n`; } catch {}
+        const licenseTexts = new Set();
+        const noticeNames = new Set(["license", "license.md", "license.txt", "license-mit", "notice"]);
+        // Use actual directory entries so Linux also finds mixed-case names such as License.
+        for (const name of (await readdir(dir)).filter((file) => noticeNames.has(file.toLowerCase())).sort()) {
+          try {
+            const licenseText = await readFile(join(dir, name), "utf8");
+            if (!licenseTexts.has(licenseText)) {
+              licenseTexts.add(licenseText);
+              notices += `${licenseText}\n\n`;
+            }
+          } catch {}
         }
       }
       break;
